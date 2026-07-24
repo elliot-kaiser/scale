@@ -1,0 +1,119 @@
+import time
+import threading
+from PIL import Image, ImageDraw, ImageFont
+import board
+import busio
+import adafruit_ssd1306
+from gpiozero import Button
+
+class ScaleHardwareManager:
+    def __init__(self, tare_callback=None, next_step_callback=None):
+        self.unit = "g"
+        self.tare_callback = tare_callback
+        self.next_step_callback = next_step_callback
+        self.running = False
+        self.thread = None
+
+        # State Engine
+        self.mode = "FREE_WEIGH"  # Strictly "FREE_WEIGH" or "GUIDED_STEP"
+        self.current_ingredient = ""
+        self.target_weight_g = 0.0
+        self.step_info = ""
+
+        # OLED Setup
+        try:
+            i2c = busio.I2C(board.SCL, board.SDA)
+            self.oled = adafruit_ssd1306.SSD1306_I2C(128, 64, i2c)
+            self.oled.fill(0)
+            self.oled.show()
+            self.hardware_ok = True
+        except Exception as e:
+            print(f"[Hardware Warning] OLED setup: {e}")
+            self.hardware_ok = False
+
+        self.image = Image.new("1", (128, 64))
+        self.draw = ImageDraw.Draw(self.image)
+        self.font = ImageFont.load_default()
+
+        # Buttons
+        try:
+            self.btn_tare = Button(17, pull_up=True, bounce_time=0.1)
+            self.btn_unit = Button(27, pull_up=True, bounce_time=0.1)
+
+            self.btn_tare.when_pressed = self._handle_tare_press
+            self.btn_unit.when_pressed = self._handle_unit_press
+        except Exception as e:
+            print(f"[Hardware Warning] Buttons setup: {e}")
+
+    def _handle_tare_press(self):
+        if self.mode == "GUIDED_STEP":
+            if self.next_step_callback:
+                self.next_step_callback()
+        else:
+            if self.tare_callback:
+                self.tare_callback()
+
+    def _handle_unit_press(self):
+        self.unit = "oz" if self.unit == "g" else "g"
+
+    def set_guided_step(self, step_info, name, target_g):
+        """Safely sets guided mode parameters."""
+        self.step_info = step_info
+        self.current_ingredient = name[:15]
+        self.target_weight_g = target_g
+        self.mode = "GUIDED_STEP"  # Set mode last to prevent partial draws
+
+    def clear_guided_mode(self):
+        """Returns OLED strictly to free-weighing mode."""
+        self.mode = "FREE_WEIGH"
+
+    def render_display(self, weight_g):
+        if not self.hardware_ok:
+            return
+
+        # Clear drawing buffer completely
+        self.draw.rectangle((0, 0, 128, 64), outline=0, fill=0)
+
+        if self.mode == "FREE_WEIGH":
+            display_w = weight_g * 0.035274 if self.unit == "oz" else weight_g
+            w_str = f"{display_w:.2f}" if self.unit == "oz" else f"{display_w:.1f}"
+
+            self.draw.text((0, 0), "SMART KITCHEN SCALE", font=self.font, fill=255)
+            self.draw.line((0, 12, 128, 12), fill=255)
+            self.draw.text((10, 26), w_str, font=self.font, fill=255)
+            self.draw.text((100, 48), self.unit.upper(), font=self.font, fill=255)
+
+        elif self.mode == "GUIDED_STEP":
+            diff = abs(weight_g - self.target_weight_g)
+            status = " [OK!]" if diff <= 3.0 else ""
+
+            self.draw.text((0, 0), f"[{self.step_info}] {self.current_ingredient}", font=self.font, fill=255)
+            self.draw.line((0, 12, 128, 12), fill=255)
+            self.draw.text((0, 18), f"Target: {self.target_weight_g:.1f}g", font=self.font, fill=255)
+            self.draw.text((0, 32), f"Live:   {weight_g:.1f}g{status}", font=self.font, fill=255)
+            self.draw.text((0, 48), "Press TARE -> Next", font=self.font, fill=255)
+
+        # Push single unified image to OLED hardware buffer
+        try:
+            self.oled.image(self.image)
+            self.oled.show()
+        except Exception:
+            pass
+
+    def start_loop(self, weight_provider_func):
+        self.running = True
+
+        def _loop():
+            while self.running:
+                w = weight_provider_func()
+                self.render_display(w)
+                time.sleep(0.2)
+
+        self.thread = threading.Thread(target=_loop, daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        self.running = False
+        if self.hardware_ok:
+            self.oled.fill(0)
+            self.oled.show()
