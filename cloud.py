@@ -132,7 +132,7 @@ def upsert_food(entry: dict):
     }
     barcode = entry.get("barcode")
     if barcode:
-        payload["barcode"] = barcode
+        payload["barcode"] = str(barcode)
 
     return _safe(
         lambda c: c.table("ingredients").upsert(payload, on_conflict="name").execute(),

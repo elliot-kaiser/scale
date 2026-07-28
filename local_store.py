@@ -11,45 +11,57 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from common_foods import as_food_dicts
+
 DATA_DIR = Path(__file__).resolve().parent / "data"
 STORE_PATH = DATA_DIR / "logs.json"
 
 _lock = threading.Lock()
 
-DEFAULT_FOODS = [
-    {"name": "Chicken Breast", "calories_per_100g": 165, "protein_per_100g": 31.0, "carbs_per_100g": 0.0, "fat_per_100g": 3.6},
-    {"name": "Chicken Thigh", "calories_per_100g": 209, "protein_per_100g": 26.0, "carbs_per_100g": 0.0, "fat_per_100g": 10.9},
-    {"name": "Rolled Oats", "calories_per_100g": 389, "protein_per_100g": 16.9, "carbs_per_100g": 66.3, "fat_per_100g": 6.9},
-    {"name": "Large Egg", "calories_per_100g": 143, "protein_per_100g": 12.6, "carbs_per_100g": 0.7, "fat_per_100g": 9.5},
-    {"name": "White Rice (Cooked)", "calories_per_100g": 130, "protein_per_100g": 2.7, "carbs_per_100g": 28.2, "fat_per_100g": 0.3},
-    {"name": "Whey Protein Powder", "calories_per_100g": 370, "protein_per_100g": 75.0, "carbs_per_100g": 6.0, "fat_per_100g": 4.0},
-    {"name": "Peanut Butter", "calories_per_100g": 588, "protein_per_100g": 25.0, "carbs_per_100g": 20.0, "fat_per_100g": 50.0},
-    {"name": "Greek Yogurt (Non-Fat)", "calories_per_100g": 59, "protein_per_100g": 10.0, "carbs_per_100g": 3.6, "fat_per_100g": 0.4},
-    {"name": "Banana", "calories_per_100g": 89, "protein_per_100g": 1.1, "carbs_per_100g": 22.8, "fat_per_100g": 0.3},
-]
+DEFAULT_FOODS = as_food_dicts()
 
 
 def _empty_store():
     return {"meals": [], "body_weights": [], "foods": [], "recipes": []}
 
 
-def _seed_foods(foods):
-    seeded = []
-    for item in DEFAULT_FOODS:
-        seeded.append(
-            {
-                "id": str(uuid.uuid4()),
-                "name": item["name"],
-                "calories_per_100g": float(item["calories_per_100g"]),
-                "protein_per_100g": float(item["protein_per_100g"]),
-                "carbs_per_100g": float(item["carbs_per_100g"]),
-                "fat_per_100g": float(item["fat_per_100g"]),
-                "serving_size_g": 100.0,
-                "basis": "per_100g",
-                "created_at": datetime.now().astimezone().isoformat(),
-            }
-        )
-    return seeded
+def _food_entry(item):
+    return {
+        "id": str(uuid.uuid4()),
+        "name": item["name"],
+        "barcode": item.get("barcode"),
+        "calories_per_100g": float(item["calories_per_100g"]),
+        "protein_per_100g": float(item["protein_per_100g"]),
+        "carbs_per_100g": float(item["carbs_per_100g"]),
+        "fat_per_100g": float(item["fat_per_100g"]),
+        "serving_size_g": 100.0,
+        "basis": "per_100g",
+        "created_at": datetime.now().astimezone().isoformat(),
+        "source": item.get("source") or "common_foods",
+    }
+
+
+def _seed_foods(_unused=None):
+    return [_food_entry(item) for item in DEFAULT_FOODS]
+
+
+def ensure_common_foods() -> dict:
+    """Merge any missing common foods into the local catalog (by name)."""
+    added = 0
+    with _lock:
+        data = _load()
+        existing = {(f.get("name") or "").strip().lower() for f in data.get("foods", [])}
+        for item in DEFAULT_FOODS:
+            key = item["name"].strip().lower()
+            if key in existing:
+                continue
+            data["foods"].append(_food_entry(item))
+            existing.add(key)
+            added += 1
+        if added:
+            _save(data)
+        total = len(data.get("foods", []))
+    return {"added": added, "total": total}
 
 
 def _load():
@@ -124,6 +136,7 @@ def normalize_food_macros(payload: dict) -> dict:
     return {
         "id": payload.get("id") or str(uuid.uuid4()),
         "name": name,
+        "barcode": (payload.get("barcode") or None),
         "calories_per_100g": _round1(cal100),
         "protein_per_100g": _round1(p100),
         "carbs_per_100g": _round1(c100),
@@ -131,6 +144,7 @@ def normalize_food_macros(payload: dict) -> dict:
         "serving_size_g": _round1(serving_size_g),
         "basis": basis,
         "created_at": payload.get("created_at") or datetime.now().astimezone().isoformat(),
+        "source": payload.get("source"),
     }
 
 

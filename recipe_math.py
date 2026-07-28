@@ -30,14 +30,14 @@ _LINE_PATTERNS = [
 
 
 def _to_grams(amount: float, unit: Optional[str]) -> float:
-    u = (unit or "g").lower()
+    u = re.sub(r"[^a-z]", "", (unit or "g").lower())
     if u in ("g", "gram", "grams"):
         return amount
-    if u == "kg":
+    if u in ("kg", "kilogram", "kilograms"):
         return amount * 1000.0
-    if u == "oz":
+    if u in ("oz", "ounce", "ounces"):
         return amount * 28.3495
-    if u in ("lb", "lbs"):
+    if u in ("lb", "lbs", "pound", "pounds"):
         return amount * 453.592
     return amount
 

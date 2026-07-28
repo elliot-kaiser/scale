@@ -2,6 +2,7 @@ import os
 import time
 import threading
 import statistics
+import base64
 from flask import Flask, render_template, jsonify, request
 import RPi.GPIO as GPIO
 
@@ -15,6 +16,10 @@ cloud.load_dotenv()
 supabase = cloud.get_client()
 if not supabase:
     print("Supabase not configured — using local data/logs.json (see .env.example)")
+
+# Ensure large common-food catalog is present locally
+_seed_info = local_store.ensure_common_foods()
+print(f"Food database ready: {_seed_info['total']} foods (+{_seed_info['added']} new)")
 
 app = Flask(__name__)
 
@@ -515,6 +520,80 @@ def api_ingredients():
     return jsonify({"status": "success", "food": entry})
 
 
+@app.route("/api/foods/from_barcode", methods=["POST"])
+def api_food_from_barcode():
+    """Lookup Open Food Facts by barcode and save to food database."""
+    import food_lookup
+
+    data = request.json or {}
+    barcode = (data.get("barcode") or "").strip()
+    save = data.get("save", True)
+    if not barcode:
+        return jsonify({"status": "error", "message": "barcode required"}), 400
+    try:
+        parsed = food_lookup.lookup_open_food_facts(barcode)
+        if not save:
+            return jsonify({"status": "success", "parsed": parsed, "saved": False})
+        entry = local_store.add_food(parsed)
+        cloud.upsert_food(entry)
+        return jsonify({"status": "success", "food": entry, "parsed": parsed, "saved": True})
+    except ValueError as e:
+        return jsonify({"status": "error", "message": str(e)}), 404
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/foods/from_label", methods=["POST"])
+def api_food_from_label():
+    """Parse a nutrition-label photo with OpenAI vision and save food."""
+    import food_lookup
+
+    save = True
+    if request.content_type and "application/json" in request.content_type:
+        data = request.json or {}
+        save = data.get("save", True)
+        b64 = data.get("image_base64") or ""
+        mime = data.get("mime") or "image/jpeg"
+        if "," in b64:
+            header, b64 = b64.split(",", 1)
+            if "image/" in header:
+                mime = header.split("image/")[1].split(";")[0]
+                mime = "image/" + mime
+        try:
+            image_bytes = base64.b64decode(b64)
+        except Exception:
+            return jsonify({"status": "error", "message": "Invalid image_base64"}), 400
+    else:
+        upload = request.files.get("image") or request.files.get("file")
+        if not upload:
+            return jsonify({"status": "error", "message": "image file required"}), 400
+        image_bytes = upload.read()
+        mime = upload.mimetype or "image/jpeg"
+        save = request.form.get("save", "true").lower() != "false"
+
+    try:
+        parsed = food_lookup.parse_nutrition_label_image(image_bytes, mime=mime)
+        if not save:
+            return jsonify({"status": "success", "parsed": parsed, "saved": False})
+        entry = local_store.add_food(parsed)
+        cloud.upsert_food(entry)
+        return jsonify({"status": "success", "food": entry, "parsed": parsed, "saved": True})
+    except ValueError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/foods/scan_status", methods=["GET"])
+def api_food_scan_status():
+    import food_lookup
+    return jsonify({
+        "barcode": True,
+        "nutrition_label": food_lookup.vision_available(),
+        "provider": "openai" if food_lookup.vision_available() else None,
+    })
+
+
 @app.route("/api/log_meal", methods=["POST"])
 def api_log_meal():
     data = request.json or {}
@@ -582,42 +661,54 @@ def api_sync_foods():
 
 @app.route("/api/recipe/parse", methods=["POST"])
 def api_parse_recipe():
+    import recipe_scrape
+
     data = request.json or {}
-    text = data.get("text") or data.get("recipe") or ""
+    text = (data.get("text") or data.get("recipe") or "").strip()
+    url = (data.get("url") or "").strip()
     title = data.get("title") or "Custom recipe"
-    parsed = recipe_math.parse_recipe_text(text, default_title=title)
+
+    # Single-line URL in the text box counts as a link paste
+    if not url and recipe_scrape.looks_like_url(text):
+        url = text if text.startswith("http") else "https://" + text
+        text = ""
+
+    try:
+        if url:
+            parsed = recipe_scrape.scrape_recipe_url(url)
+        else:
+            parsed = recipe_math.parse_recipe_text(text, default_title=title)
+    except ValueError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
     enriched = _enrich_ingredients(parsed["ingredients"])
     return jsonify({
         "status": "success",
-        "title": parsed["title"],
+        "title": parsed.get("title") or title,
         "ingredients": enriched,
+        "source_url": parsed.get("source_url") or url or None,
+        "host": parsed.get("host"),
+        "yields": parsed.get("yields"),
     })
 
 
 @app.route("/api/recipe/scrape", methods=["POST"])
 def api_scrape_recipe():
-    """Accept URL or free-text paste; free-text is preferred."""
-    data = request.json or {}
-    text = data.get("text") or ""
-    url = data.get("url", "")
-    if text.strip():
-        parsed = recipe_math.parse_recipe_text(text)
-        enriched = _enrich_ingredients(parsed["ingredients"])
-        return jsonify({"status": "success", "title": parsed["title"], "ingredients": enriched})
+    """Alias for /api/recipe/parse — accepts url or free-text."""
+    return api_parse_recipe()
 
-    # Fallback demo when only a URL is provided
-    sample = {
-        "status": "success",
-        "title": "High-Protein Bowl",
-        "ingredients": _enrich_ingredients([
-            {"name": "Chicken Breast", "target_g": 150.0},
-            {"name": "White Rice (Cooked)", "target_g": 200.0},
-            {"name": "Peanut Butter", "target_g": 30.0},
-        ]),
-        "source_url": url,
-        "note": "URL scraping is demo-only; paste ingredient lines for real recipes.",
-    }
-    return jsonify(sample)
+
+@app.route("/api/foods/seed_common", methods=["POST"])
+def api_seed_common_foods():
+    """Merge the built-in common-foods catalog into local (+ optional Supabase sync)."""
+    info = local_store.ensure_common_foods()
+    payload = request.get_json(silent=True) or {}
+    synced = 0
+    if cloud.is_configured() and payload.get("sync", True):
+        synced = cloud.sync_local_foods_to_cloud(local_store.list_foods())
+    return jsonify({"status": "success", **info, "synced": synced})
 
 
 @app.route("/api/recipes", methods=["GET", "POST"])

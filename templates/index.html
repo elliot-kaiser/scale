@@ -572,6 +572,34 @@
       line-height: 1.4;
     }
 
+    .scan-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .barcode-reader {
+      margin: 0.65rem 0;
+      overflow: hidden;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #111;
+    }
+
+    .barcode-reader video { width: 100%; display: block; }
+
+    .scan-preview {
+      margin: 0.65rem 0;
+      padding: 0.75rem 0.85rem;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #fff;
+      font-size: 0.85rem;
+    }
+
+    .scan-preview strong { display: block; margin-bottom: 0.25rem; }
+
     .add-food {
       margin-top: 1.15rem;
       padding-top: 1rem;
@@ -860,19 +888,23 @@
     <div id="scrape" class="panel is-active" role="tabpanel">
       <div class="section">
         <h3>Cook a recipe</h3>
-        <p class="hint">Paste ingredients or open a saved recipe. Weigh each item, the cooked total, then your portion — macros are calculated automatically.</p>
+        <p class="hint">Paste a recipe URL or ingredient list, or open a saved recipe. Then weigh ingredients → cooked total → your portion.</p>
 
         <div class="subtabs" role="tablist" aria-label="Recipe source">
-          <button type="button" class="subtab is-active" data-sub="paste">Paste</button>
+          <button type="button" class="subtab is-active" data-sub="paste">Paste / Link</button>
           <button type="button" class="subtab" data-sub="saved">Saved</button>
         </div>
 
         <div id="sub-paste" class="subpanel is-active">
+          <label class="field-stack" style="margin-bottom:0.55rem;">
+            <span style="font-size:0.72rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--muted);">Recipe URL</span>
+            <input type="url" id="recipe-url" class="field" placeholder="https://www.allrecipes.com/…" inputmode="url" autocomplete="url">
+          </label>
           <label class="field-stack" style="margin-bottom:0.75rem;">
-            <span style="font-size:0.72rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--muted);">Recipe text</span>
+            <span style="font-size:0.72rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--muted);">Or paste ingredients</span>
             <textarea id="recipe-text" class="field" placeholder="Protein Bowl&#10;150g Chicken Breast&#10;200g White Rice (Cooked)&#10;30g Peanut Butter"></textarea>
           </label>
-          <button type="button" class="btn btn-primary btn-block" onclick="parseRecipeText()">Parse recipe</button>
+          <button type="button" class="btn btn-primary btn-block" onclick="parseRecipeText()">Parse &amp; prepare</button>
         </div>
 
         <div id="sub-saved" class="subpanel">
@@ -901,7 +933,21 @@
 
         <div class="add-food">
           <h4>Add food to database</h4>
-          <p class="hint">Enter macros per 100g, or for a whole package / serving.</p>
+          <p class="hint">Manual entry, barcode lookup (Open Food Facts), or nutrition-label photo.</p>
+
+          <div class="scan-actions">
+            <button type="button" class="btn btn-ghost" onclick="startBarcodeScan()">Scan barcode</button>
+            <button type="button" class="btn btn-ghost" id="label-scan-btn" onclick="document.getElementById('label-file').click()">Label photo</button>
+            <input type="file" id="barcode-file" accept="image/*" capture="environment" hidden>
+            <input type="file" id="label-file" accept="image/*" capture="environment" hidden>
+          </div>
+          <div class="field-row" style="margin-top:0.55rem;">
+            <input type="text" id="barcode-manual" class="field" placeholder="Or type barcode…" inputmode="numeric">
+            <button type="button" class="btn btn-primary" onclick="lookupTypedBarcode()">Lookup</button>
+          </div>
+          <p class="hint" id="scan-status-hint" style="margin-top:0.35rem;"></p>
+          <div id="barcode-reader" class="barcode-reader" style="display:none;"></div>
+          <div id="scan-preview" class="scan-preview" style="display:none;"></div>
 
           <div class="basis-toggle" role="group" aria-label="Macro basis">
             <button type="button" class="is-active" data-basis="per_100g" id="basis-100">Per 100g</button>
@@ -915,6 +961,7 @@
             <label class="serving-row" id="serving-row">Package / serving weight (g)
               <input type="number" step="0.1" min="0.1" id="food-serving-g" class="field" placeholder="e.g. 340" inputmode="decimal">
             </label>
+            <input type="hidden" id="food-barcode" value="">
           </div>
 
           <div class="macro-grid">
@@ -969,6 +1016,7 @@
     <div id="toast" class="toast"></div>
   </div>
 
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script>
     let currentRecipe = null;
     let lastWeightRawG = 0;
@@ -977,6 +1025,173 @@
     let toastTimer = null;
     let guidedTargetG = 0;
     let foodBasis = 'per_100g';
+    let html5QrCode = null;
+    let labelVisionEnabled = false;
+
+    async function refreshScanStatus() {
+      try {
+        const res = await fetch('/api/foods/scan_status');
+        const data = await res.json();
+        labelVisionEnabled = !!data.nutrition_label;
+        const hint = document.getElementById('scan-status-hint');
+        hint.textContent = labelVisionEnabled
+          ? 'Barcode uses Open Food Facts. Label photos use OpenAI vision.'
+          : 'Barcode works now. Add OPENAI_API_KEY to .env to enable nutrition-label photos.';
+        document.getElementById('label-scan-btn').disabled = false;
+      } catch (e) {}
+    }
+    refreshScanStatus();
+
+    function fillFoodForm(parsed) {
+      document.getElementById('food-name').value = parsed.name || '';
+      document.getElementById('food-barcode').value = parsed.barcode || '';
+      document.getElementById('food-cal').value = parsed.calories ?? '';
+      document.getElementById('food-protein').value = parsed.protein ?? '';
+      document.getElementById('food-carbs').value = parsed.carbs ?? '';
+      document.getElementById('food-fat').value = parsed.fat ?? '';
+      const basis = parsed.basis || 'per_100g';
+      foodBasis = basis;
+      document.querySelectorAll('.basis-toggle button').forEach(b => {
+        b.classList.toggle('is-active', b.dataset.basis === basis);
+      });
+      document.getElementById('serving-row').classList.toggle('is-show', basis === 'per_serving');
+      if (basis === 'per_serving' && parsed.serving_size_g) {
+        document.getElementById('food-serving-g').value = parsed.serving_size_g;
+      }
+      const preview = document.getElementById('scan-preview');
+      preview.style.display = 'block';
+      preview.innerHTML = '<strong>' + (parsed.name || 'Food') + '</strong>'
+        + (parsed.calories ?? 0) + ' kcal / '
+        + (basis === 'per_100g' ? '100g' : ((parsed.serving_size_g || '?') + 'g serving'))
+        + ' · P' + (parsed.protein ?? 0)
+        + ' C' + (parsed.carbs ?? 0)
+        + ' F' + (parsed.fat ?? 0)
+        + (parsed.barcode ? (' · #' + parsed.barcode) : '');
+    }
+
+    async function saveFoodFromParsed(parsed, alreadySaved) {
+      if (alreadySaved && parsed) {
+        fillFoodForm(parsed);
+        showToast('Saved ' + (parsed.name || 'food'));
+        document.getElementById('ing-search').value = parsed.name || '';
+        if (parsed.name) searchIngredients(parsed.name);
+        return;
+      }
+      fillFoodForm(parsed);
+      showToast('Review macros, then tap Save food');
+    }
+
+    async function lookupBarcode(code) {
+      showToast('Looking up barcode…');
+      try {
+        const res = await fetch('/api/foods/from_barcode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ barcode: code, save: true })
+        });
+        const data = await res.json();
+        if (!res.ok) return showToast(data.message || 'Barcode not found');
+        await saveFoodFromParsed(data.parsed || {
+          name: data.food.name,
+          barcode: data.food.barcode,
+          basis: 'per_100g',
+          calories: data.food.calories_per_100g,
+          protein: data.food.protein_per_100g,
+          carbs: data.food.carbs_per_100g,
+          fat: data.food.fat_per_100g,
+        }, true);
+      } catch (e) {
+        showToast('Barcode lookup failed');
+      }
+    }
+
+    async function lookupTypedBarcode() {
+      const code = document.getElementById('barcode-manual').value.trim();
+      if (!code) return showToast('Enter a barcode');
+      await lookupBarcode(code);
+    }
+
+    async function stopBarcodeScan() {
+      const box = document.getElementById('barcode-reader');
+      if (html5QrCode) {
+        try { await html5QrCode.stop(); } catch (e) {}
+        try { await html5QrCode.clear(); } catch (e) {}
+        html5QrCode = null;
+      }
+      box.style.display = 'none';
+      box.innerHTML = '';
+    }
+
+    async function startBarcodeScan() {
+      if (typeof Html5Qrcode === 'undefined') {
+        document.getElementById('barcode-file').click();
+        return showToast('Camera scanner unavailable — pick a barcode photo');
+      }
+      const box = document.getElementById('barcode-reader');
+      if (html5QrCode) {
+        await stopBarcodeScan();
+        return;
+      }
+      box.style.display = 'block';
+      box.innerHTML = '';
+      html5QrCode = new Html5Qrcode('barcode-reader');
+      try {
+        await html5QrCode.start(
+          { facingMode: 'environment' },
+          { fps: 8, qrbox: { width: 240, height: 140 } },
+          async (decoded) => {
+            await stopBarcodeScan();
+            await lookupBarcode(decoded);
+          },
+          () => {}
+        );
+        showToast('Point camera at barcode (tap Scan again to cancel)');
+      } catch (e) {
+        await stopBarcodeScan();
+        document.getElementById('barcode-file').click();
+        showToast('Camera blocked — choose a barcode image instead');
+      }
+    }
+
+    document.getElementById('barcode-file').addEventListener('change', async (ev) => {
+      const file = ev.target.files && ev.target.files[0];
+      ev.target.value = '';
+      if (!file) return;
+      if (typeof Html5Qrcode === 'undefined') {
+        return showToast('Barcode image decode unavailable');
+      }
+      showToast('Reading barcode from photo…');
+      const scanner = new Html5Qrcode('barcode-reader');
+      try {
+        const decoded = await scanner.scanFile(file, true);
+        await scanner.clear();
+        await lookupBarcode(decoded);
+      } catch (e) {
+        try { await scanner.clear(); } catch (err) {}
+        showToast('Could not read barcode from photo — try typing it');
+      }
+    });
+
+    document.getElementById('label-file').addEventListener('change', async (ev) => {
+      const file = ev.target.files && ev.target.files[0];
+      ev.target.value = '';
+      if (!file) return;
+      if (!labelVisionEnabled) {
+        return showToast('Add OPENAI_API_KEY to .env for label scanning');
+      }
+      showToast('Reading nutrition label…');
+      const form = new FormData();
+      form.append('image', file);
+      form.append('save', 'true');
+      try {
+        const res = await fetch('/api/foods/from_label', { method: 'POST', body: form });
+        const data = await res.json();
+        if (!res.ok) return showToast(data.message || 'Label parse failed');
+        await saveFoodFromParsed(data.parsed, true);
+      } catch (e) {
+        showToast('Label upload failed');
+      }
+    });
 
     document.querySelectorAll('.basis-toggle button').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1028,6 +1243,7 @@
         protein,
         carbs,
         fat,
+        barcode: document.getElementById('food-barcode').value || null,
       };
       if (foodBasis === 'per_serving') payload.serving_size_g = serving;
 
@@ -1131,16 +1347,21 @@
 
     async function parseRecipeText() {
       const text = document.getElementById('recipe-text').value;
-      if (!text.trim()) return showToast('Paste a recipe first');
+      const url = (document.getElementById('recipe-url').value || '').trim();
+      if (!text.trim() && !url) return showToast('Paste a URL or ingredient list');
+      showToast(url ? 'Fetching recipe…' : 'Parsing recipe…');
       try {
         const res = await fetch('/api/recipe/parse', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text })
+          body: JSON.stringify({ text, url })
         });
         const data = await res.json();
-        if (data.status !== 'success') return showToast(data.message || 'Could not parse');
+        if (!res.ok || data.status !== 'success') {
+          return showToast(data.message || 'Could not parse');
+        }
         showParsedRecipe(data);
+        showToast('Ready — start weighing when set');
       } catch (e) {
         showToast('Parse failed');
       }
