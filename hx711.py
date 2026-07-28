@@ -1,5 +1,8 @@
 import time
+import statistics
+import threading
 import RPi.GPIO as GPIO
+
 
 class HX711:
     def __init__(self, dout_pin=5, pd_sck_pin=6, gain=128):
@@ -8,6 +11,7 @@ class HX711:
         self.gain = gain
         self.OFFSET = 0
         self.SCALE = 1.0
+        self._lock = threading.Lock()
 
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(self.pd_sck_pin, GPIO.OUT)
@@ -18,7 +22,12 @@ class HX711:
         return GPIO.input(self.dout_pin) == 0
 
     def read_raw(self):
+        # Wait for conversion ready (DOUT low). Do NOT sleep while SCK is high —
+        # HX711 powers down if PD_SCK stays high > ~60µs.
+        deadline = time.monotonic() + 0.5
         while not self.is_ready():
+            if time.monotonic() > deadline:
+                raise TimeoutError("HX711 not ready")
             time.sleep(0.001)
 
         count = 0
@@ -29,43 +38,39 @@ class HX711:
             if GPIO.input(self.dout_pin):
                 count += 1
 
-        # Pulse clock pin for gain setting
         for _ in range(1 if self.gain == 128 else 3):
             GPIO.output(self.pd_sck_pin, True)
             GPIO.output(self.pd_sck_pin, False)
 
-        # 24-bit 2's complement conversion
         if count & 0x800000:
             count -= 0x1000000
 
         return count
 
-    def get_weight(self, times=3):
+    def _median_raw(self, times):
         values = []
-        for _ in range(times):
+        for i in range(times):
             values.append(self.read_raw())
-            if times > 1:
+            if i + 1 < times:
                 time.sleep(0.02)
-        raw_avg = sum(values) / len(values)
-        return (raw_avg - self.OFFSET) / self.SCALE
+        return statistics.median(values)
+
+    def get_weight(self, times=3):
+        with self._lock:
+            raw = self._median_raw(max(1, times))
+            return (raw - self.OFFSET) / self.SCALE
 
     def tare(self, times=15):
-        values = []
-        for _ in range(times):
-            values.append(self.read_raw())
-            if times > 1:
-                time.sleep(0.02)
-        self.OFFSET = sum(values) / len(values)
+        with self._lock:
+            self.OFFSET = self._median_raw(max(1, times))
 
     def zero(self, times=15):
-        """Alias so both hx.zero() and hx.tare() work seamlessly"""
         self.tare(times)
 
     def set_reference_unit(self, reference_unit):
         self.SCALE = reference_unit if reference_unit != 0 else 1.0
 
     def set_scale(self, scale):
-        """Alias for set_reference_unit"""
         self.set_reference_unit(scale)
 
     def reset(self):

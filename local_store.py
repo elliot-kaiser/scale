@@ -79,6 +79,10 @@ def _load():
         data.setdefault("body_weights", [])
         data.setdefault("foods", [])
         data.setdefault("recipes", [])
+        data.setdefault("targets", {})
+        data.setdefault("weight_goal", {})
+        data.setdefault("plan_excluded_dates", [])
+        data.setdefault("recent_food_ids", [])
         if not data["foods"]:
             data["foods"] = _seed_foods([])
             _save(data)
@@ -172,6 +176,225 @@ def list_foods() -> list:
         return list(_load().get("foods", []))
 
 
+def get_food(food_id) -> dict | None:
+    with _lock:
+        for food in _load().get("foods", []):
+            if str(food.get("id")) == str(food_id):
+                return food
+    return None
+
+
+def update_food(food_id, payload: dict) -> dict | None:
+    with _lock:
+        data = _load()
+        for i, food in enumerate(data.get("foods", [])):
+            if str(food.get("id")) != str(food_id):
+                continue
+            merged = {**food, **payload, "id": food.get("id")}
+            if any(k in payload for k in ("calories", "protein", "carbs", "fat", "basis", "serving_size_g", "name")):
+                try:
+                    normalized = normalize_food_macros({
+                        "name": merged.get("name"),
+                        "basis": payload.get("basis") or merged.get("basis") or "per_100g",
+                        "calories": payload.get("calories", merged.get("calories_per_100g")),
+                        "protein": payload.get("protein", merged.get("protein_per_100g")),
+                        "carbs": payload.get("carbs", merged.get("carbs_per_100g")),
+                        "fat": payload.get("fat", merged.get("fat_per_100g")),
+                        "serving_size_g": payload.get("serving_size_g", merged.get("serving_size_g") or 100),
+                        "barcode": payload.get("barcode", merged.get("barcode")),
+                        "id": food.get("id"),
+                        "created_at": food.get("created_at"),
+                    })
+                    data["foods"][i] = normalized
+                except ValueError:
+                    return None
+            else:
+                for key in ("name", "barcode", "calories_per_100g", "protein_per_100g", "carbs_per_100g", "fat_per_100g"):
+                    if key in payload:
+                        data["foods"][i][key] = payload[key]
+            _save(data)
+            return data["foods"][i]
+    return None
+
+
+def delete_food(food_id) -> bool:
+    with _lock:
+        data = _load()
+        before = len(data.get("foods", []))
+        data["foods"] = [f for f in data.get("foods", []) if str(f.get("id")) != str(food_id)]
+        if len(data["foods"]) == before:
+            return False
+        _save(data)
+        return True
+
+
+def update_meal(meal_id, payload: dict) -> dict | None:
+    with _lock:
+        data = _load()
+        for i, meal in enumerate(data.get("meals", [])):
+            if str(meal.get("id")) != str(meal_id):
+                continue
+            for key in ("food_name", "weight_g", "calories", "protein", "carbs", "fat", "date"):
+                if key in payload and payload[key] is not None:
+                    if key == "food_name":
+                        data["meals"][i][key] = str(payload[key])
+                    elif key == "date":
+                        data["meals"][i][key] = str(payload[key])
+                    else:
+                        data["meals"][i][key] = float(payload[key])
+            _save(data)
+            return data["meals"][i]
+    return None
+
+
+def delete_meal(meal_id) -> bool:
+    with _lock:
+        data = _load()
+        before = len(data.get("meals", []))
+        data["meals"] = [m for m in data.get("meals", []) if str(m.get("id")) != str(meal_id)]
+        if len(data["meals"]) == before:
+            # Also allow delete by cloud numeric id stored separately
+            return False
+        _save(data)
+        return True
+
+
+DEFAULT_TARGETS = {
+    "target_calories": 2200.0,
+    "target_protein": 165.0,
+    "target_carbs": 220.0,
+    "target_fat": 73.3,
+    "percent_protein": 30.0,
+    "percent_carbs": 40.0,
+    "percent_fat": 30.0,
+}
+
+_PCT_KEYS = ("percent_protein", "percent_carbs", "percent_fat")
+
+
+def macros_from_calorie_percents(calories: float, p_pct: float, c_pct: float, f_pct: float) -> dict:
+    """Convert calorie % split into grams (P/C=4 kcal/g, F=9 kcal/g)."""
+    cal = max(0.0, float(calories or 0))
+    return {
+        "target_protein": _round1(cal * (float(p_pct) / 100.0) / 4.0),
+        "target_carbs": _round1(cal * (float(c_pct) / 100.0) / 4.0),
+        "target_fat": _round1(cal * (float(f_pct) / 100.0) / 9.0),
+    }
+
+
+def percents_from_macro_grams(calories: float, protein: float, carbs: float, fat: float) -> dict:
+    cal = float(calories or 0)
+    if cal <= 0:
+        return {
+            "percent_protein": DEFAULT_TARGETS["percent_protein"],
+            "percent_carbs": DEFAULT_TARGETS["percent_carbs"],
+            "percent_fat": DEFAULT_TARGETS["percent_fat"],
+        }
+    return {
+        "percent_protein": _round1(float(protein or 0) * 4.0 / cal * 100.0),
+        "percent_carbs": _round1(float(carbs or 0) * 4.0 / cal * 100.0),
+        "percent_fat": _round1(float(fat or 0) * 9.0 / cal * 100.0),
+    }
+
+
+def get_targets() -> dict:
+    with _lock:
+        data = _load()
+        targets = data.get("targets") or {}
+    out = dict(DEFAULT_TARGETS)
+    for key in DEFAULT_TARGETS:
+        if key in targets and targets[key] is not None:
+            out[key] = float(targets[key])
+    # Backfill percents from grams when older saves only have grams
+    if not any(k in targets for k in _PCT_KEYS):
+        out.update(
+            percents_from_macro_grams(
+                out["target_calories"],
+                out["target_protein"],
+                out["target_carbs"],
+                out["target_fat"],
+            )
+        )
+    return out
+
+
+def set_targets(payload: dict) -> dict:
+    current = get_targets()
+    for key in DEFAULT_TARGETS:
+        if key in payload and payload[key] is not None:
+            try:
+                current[key] = float(payload[key])
+            except (TypeError, ValueError):
+                pass
+
+    has_pct = any(k in payload and payload[k] is not None for k in _PCT_KEYS)
+    has_grams = any(
+        k in payload and payload[k] is not None
+        for k in ("target_protein", "target_carbs", "target_fat")
+    )
+    cal_only = (
+        "target_calories" in payload
+        and payload.get("target_calories") is not None
+        and not has_pct
+        and not has_grams
+    )
+
+    if has_pct or cal_only:
+        # Calories × % → grams (save form / calorie tweak with stored split)
+        current.update(
+            macros_from_calorie_percents(
+                current["target_calories"],
+                current["percent_protein"],
+                current["percent_carbs"],
+                current["percent_fat"],
+            )
+        )
+    elif has_grams and not has_pct:
+        # Gram targets without percents (e.g. cloud sync) → derive %
+        current.update(
+            percents_from_macro_grams(
+                current["target_calories"],
+                current["target_protein"],
+                current["target_carbs"],
+                current["target_fat"],
+            )
+        )
+
+    with _lock:
+        data = _load()
+        data["targets"] = current
+        _save(data)
+    return current
+
+
+def today_progress(meals=None, targets=None) -> dict:
+    targets = targets or get_targets()
+    today = datetime.now().astimezone().date().isoformat()
+    if meals is None:
+        meals = get_meals()
+    day = day_detail(today, meals=meals, body_weights=[])
+    totals = day["totals"]
+    remaining = {
+        "calories": _round1(targets["target_calories"] - totals["calories"]),
+        "protein": _round1(targets["target_protein"] - totals["protein"]),
+        "carbs": _round1(targets["target_carbs"] - totals["carbs"]),
+        "fat": _round1(targets["target_fat"] - totals["fat"]),
+    }
+    return {
+        "date": today,
+        "targets": targets,
+        "consumed": {
+            "calories": totals["calories"],
+            "protein": totals["protein"],
+            "carbs": totals["carbs"],
+            "fat": totals["fat"],
+            "weight_g": totals["weight_g"],
+            "meals_count": totals["meals_count"],
+        },
+        "remaining": remaining,
+    }
+
+
 def add_meal(payload: dict, date_override=None) -> dict:
     date_str, logged_at = _now_parts(date_override)
     entry = {
@@ -184,12 +407,87 @@ def add_meal(payload: dict, date_override=None) -> dict:
         "protein": float(payload.get("protein") or 0),
         "carbs": float(payload.get("carbs") or 0),
         "fat": float(payload.get("fat") or 0),
+        "ingredient_id": payload.get("ingredient_id") or payload.get("food_id"),
     }
     with _lock:
         data = _load()
         data["meals"].append(entry)
+        # Track recent food ids for quick-log chips
+        recent = list(data.get("recent_food_ids") or [])
+        fid = entry.get("ingredient_id")
+        key = str(fid) if fid is not None else (entry["food_name"] or "").strip().lower()
+        if key:
+            recent = [r for r in recent if str(r) != key]
+            recent.insert(0, key if fid is None else fid)
+            data["recent_food_ids"] = recent[:20]
         _save(data)
     return entry
+
+
+def recent_foods_for_quick_log(limit: int = 8, foods=None, meals=None) -> list:
+    """Return recently logged foods with per-100g macros for one-tap logging."""
+    foods = foods if foods is not None else list_foods()
+    meals = meals if meals is not None else get_meals()
+    by_id = {str(f.get("id")): f for f in foods if f.get("id") is not None}
+    by_name = {(f.get("name") or "").strip().lower(): f for f in foods}
+
+    with _lock:
+        recent_keys = list((_load().get("recent_food_ids") or []))
+
+    ordered = []
+    seen = set()
+
+    def _push(food):
+        if not food:
+            return
+        key = str(food.get("id") or (food.get("name") or "").lower())
+        if key in seen:
+            return
+        seen.add(key)
+        ordered.append(
+            {
+                "id": food.get("id"),
+                "name": food.get("name"),
+                "calories_per_100g": float(food.get("calories_per_100g") or 0),
+                "protein_per_100g": float(food.get("protein_per_100g") or 0),
+                "carbs_per_100g": float(food.get("carbs_per_100g") or 0),
+                "fat_per_100g": float(food.get("fat_per_100g") or 0),
+            }
+        )
+
+    for key in recent_keys:
+        if str(key) in by_id:
+            _push(by_id[str(key)])
+        elif str(key).lower() in by_name:
+            _push(by_name[str(key).lower()])
+        if len(ordered) >= limit:
+            return ordered
+
+    # Fall back to unique meal names (newest first)
+    for meal in sorted(meals, key=lambda m: m.get("logged_at") or "", reverse=True):
+        name = (meal.get("food_name") or "").strip()
+        if not name or name.startswith("[Sample]"):
+            continue
+        food = by_name.get(name.lower())
+        if food:
+            _push(food)
+        else:
+            # Synthesize from last meal macros scaled to 100g if possible
+            w = float(meal.get("weight_g") or 0)
+            if w > 0:
+                factor = 100.0 / w
+                synth = {
+                    "id": meal.get("ingredient_id"),
+                    "name": name,
+                    "calories_per_100g": _round1(float(meal.get("calories") or 0) * factor),
+                    "protein_per_100g": _round1(float(meal.get("protein") or 0) * factor),
+                    "carbs_per_100g": _round1(float(meal.get("carbs") or 0) * factor),
+                    "fat_per_100g": _round1(float(meal.get("fat") or 0) * factor),
+                }
+                _push(synth)
+        if len(ordered) >= limit:
+            break
+    return ordered
 
 
 def add_body_weight(payload: dict, date_override=None) -> dict:
@@ -215,6 +513,90 @@ def get_meals() -> list:
 def get_body_weights() -> list:
     with _lock:
         return list(_load().get("body_weights", []))
+
+
+DEFAULT_WEIGHT_GOAL = {
+    "goal_weight_lbs": None,
+    "goal_date": None,
+}
+
+
+def get_weight_goal() -> dict:
+    with _lock:
+        stored = (_load().get("weight_goal") or {})
+    out = dict(DEFAULT_WEIGHT_GOAL)
+    if stored.get("goal_weight_lbs") is not None:
+        try:
+            out["goal_weight_lbs"] = float(stored["goal_weight_lbs"])
+        except (TypeError, ValueError):
+            pass
+    if stored.get("goal_date"):
+        out["goal_date"] = str(stored["goal_date"])
+    return out
+
+
+def set_weight_goal(payload: dict) -> dict:
+    current = get_weight_goal()
+    if "goal_weight_lbs" in payload:
+        raw = payload.get("goal_weight_lbs")
+        if raw is None or raw == "":
+            current["goal_weight_lbs"] = None
+        else:
+            current["goal_weight_lbs"] = float(raw)
+    if "goal_date" in payload:
+        raw = payload.get("goal_date")
+        current["goal_date"] = str(raw).strip() if raw else None
+    with _lock:
+        data = _load()
+        data["weight_goal"] = current
+        _save(data)
+    return current
+
+
+def get_plan_excluded_dates() -> list:
+    with _lock:
+        raw = _load().get("plan_excluded_dates") or []
+    out = []
+    seen = set()
+    for item in raw:
+        text = str(item or "").strip().split("T", 1)[0]
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    out.sort()
+    return out
+
+
+def set_plan_excluded_dates(dates) -> list:
+    cleaned = []
+    seen = set()
+    for item in dates or []:
+        text = str(item or "").strip().split("T", 1)[0]
+        if text and text not in seen:
+            seen.add(text)
+            cleaned.append(text)
+    cleaned.sort()
+    with _lock:
+        data = _load()
+        data["plan_excluded_dates"] = cleaned
+        _save(data)
+    return cleaned
+
+
+def toggle_plan_excluded_date(date_str: str, excluded: bool | None = None) -> dict:
+    """Mark/unmark a day as excluded from weight-plan calorie averages."""
+    key = str(date_str or "").strip().split("T", 1)[0]
+    if not key:
+        raise ValueError("date is required")
+    current = set(get_plan_excluded_dates())
+    if excluded is None:
+        excluded = key not in current
+    if excluded:
+        current.add(key)
+    else:
+        current.discard(key)
+    dates = set_plan_excluded_dates(sorted(current))
+    return {"date": key, "excluded": key in set(dates), "excluded_dates": dates}
 
 
 def _aggregate(meals, body_weights, days: int = 60):

@@ -7,7 +7,7 @@ import urllib.request
 from typing import Optional
 from urllib.parse import urlparse
 
-from recipe_math import parse_recipe_text, _to_grams
+from recipe_math import _to_grams
 
 # Approximate grams per US cup by ingredient keyword (best-effort for targets).
 _CUP_DENSITIES = [
@@ -20,7 +20,7 @@ _CUP_DENSITIES = [
     (["butter", "margarine"], 227),
     (["oil", "olive oil", "vegetable oil", "canola"], 218),
     (["milk", "almond milk", "oat milk", "soy milk"], 240),
-    (["water", "broth", "stock", "stock"], 240),
+    (["water", "broth", "stock"], 240),
     (["cream", "heavy cream", "whipping cream"], 238),
     (["yogurt", "yoghurt", "greek yogurt"], 245),
     (["sour cream"], 230),
@@ -40,9 +40,42 @@ _CUP_DENSITIES = [
     (["potato"], 150),
     (["bean", "black bean", "chickpea", "lentil"], 180),
     (["pasta", "uncooked pasta", "spaghetti", "penne"], 100),
-    (["breadcrumb", "panko"], 108),
+    (["bread crumb", "breadcrumb", "breadcrumbs", "panko"], 108),
     (["nut", "almond", "walnut", "cashew", "pecan"], 140),
     (["chocolate chip", "chocolate"], 170),
+    (["salt"], 273),
+    (["pepper"], 100),
+]
+
+# Countable items with no unit (e.g. "1 large egg", "2 garlic cloves")
+_COUNT_GRAMS = [
+    (["extra large egg", "extra-large egg", "xl egg"], 56.0),
+    (["jumbo egg"], 63.0),
+    (["large egg"], 50.0),
+    (["medium egg"], 44.0),
+    (["small egg"], 38.0),
+    (["egg white", "egg whites"], 33.0),
+    (["egg yolk", "egg yolks"], 17.0),
+    (["egg", "eggs"], 50.0),
+    (["garlic clove", "clove garlic", "cloves garlic", "clove of garlic"], 3.0),
+    (["shallot"], 25.0),
+    (["scallion", "green onion", "spring onion"], 15.0),
+    (["bay leaf", "bay leaves"], 0.2),
+]
+
+# Seasonings / tiny amounts — skippable during guided weighing
+_SKIPPABLE_KEYWORDS = [
+    "salt", "pepper", "paprika", "cumin", "oregano", "thyme", "basil",
+    "rosemary", "parsley", "cilantro", "dill", "sage", "marjoram", "tarragon",
+    "garlic powder", "onion powder", "chili powder", "cayenne", "chipotle",
+    "red pepper flake", "crushed red pepper", "seasoning", "spice", "spices",
+    "extract", "vanilla", "almond extract", "baking soda", "baking powder",
+    "dry mustard", "mustard powder", "worcestershire", "hot sauce",
+    "soy sauce", "fish sauce", "sesame oil", "vinegar", "lemon juice",
+    "lime juice", "pinch", "dash", "to taste", "for garnish", "garnish",
+    "optional", "cooking spray", "nonstick", "for serving", "as needed",
+    "black pepper", "white pepper", "kosher salt", "sea salt", "flaky salt",
+    "msg", "bouillon", "stock cube", "bay leaf", "bay leaves",
 ]
 
 _FRACTIONS = {
@@ -81,7 +114,7 @@ def _cup_grams_for(name: str) -> float:
     for keys, grams in _CUP_DENSITIES:
         if any(k in lower for k in keys):
             return float(grams)
-    return 240.0  # water-like default
+    return 240.0
 
 
 def _volume_to_grams(amount: float, unit: str, name: str) -> float:
@@ -94,60 +127,93 @@ def _volume_to_grams(amount: float, unit: str, name: str) -> float:
     if u in ("teaspoon", "teaspoons", "tsp"):
         return amount * (cup_g / 48.0)
     if u in ("ml", "milliliter", "milliliters"):
-        # Approximate ml ~= g for water-like; scale vs cup density
         return amount * (cup_g / 240.0)
     if u in ("l", "liter", "liters"):
         return amount * 1000.0 * (cup_g / 240.0)
     return _to_grams(amount, unit)
 
 
+def _count_grams_for(name: str) -> Optional[float]:
+    lower = (name or "").lower()
+    for keys, grams in _COUNT_GRAMS:
+        if any(k in lower for k in keys):
+            return float(grams)
+    return None
+
+
+def is_skippable_ingredient(name: str, raw: str = "", unit: Optional[str] = None, amount: float = 0) -> bool:
+    """Seasonings and tiny garnish amounts that don't need the scale."""
+    text = f"{name or ''} {raw or ''}".lower()
+    if any(k in text for k in _SKIPPABLE_KEYWORDS):
+        return True
+    if re.search(r"\b(to taste|as needed|optional|for garnish|for serving)\b", text):
+        return True
+    return False
+
+
 def _clean_name(name: str) -> str:
     name = re.sub(r"\s+", " ", name or "").strip(" ,;")
-    # Drop trailing prep notes in parentheses if very long
     name = re.sub(r"\s*\([^)]{40,}\)\s*", " ", name).strip()
-    # Remove leading phrases like "fresh", keep substance
     return name[:80] or "Ingredient"
 
 
 def parse_ingredient_string(line: str) -> dict:
-    """Convert a free-form recipe ingredient string into {name, target_g, raw}."""
+    """Convert a free-form recipe ingredient into {name, target_g, raw, skippable}."""
     raw = re.sub(r"^[\-\*\u2022]+\s*", "", (line or "").strip())
     raw = re.sub(r"^\d+[\.\)]\s+", "", raw).strip()
     if not raw:
-        return {"name": "Ingredient", "target_g": 0.0, "raw": line}
+        return {"name": "Ingredient", "target_g": 0.0, "raw": line, "skippable": False}
 
-    # Prefer structured parse
     m = _ING_LINE.match(raw)
     if m:
         amount = _parse_qty(m.group("qty"))
         unit = m.group("unit")
         name = _clean_name(m.group("name"))
+        grams = 0.0
         if unit:
             grams = _volume_to_grams(amount, unit, name)
         else:
-            # Bare number — assume grams if large, else count (leave 0 target)
-            grams = amount if amount >= 10 else 0.0
-            if amount < 10 and not unit:
-                # e.g. "2 eggs" — try to weigh later freely
+            per = _count_grams_for(name)
+            if per is not None:
+                grams = amount * per
+            elif amount >= 10:
+                grams = amount
+            else:
                 grams = 0.0
+
+        skippable = is_skippable_ingredient(name, raw, unit, amount)
         return {
             "name": name,
             "target_g": round(max(0.0, grams), 1),
             "raw": raw,
             "parsed_amount": amount,
             "parsed_unit": unit,
+            "skippable": skippable,
         }
 
-    # Fall back to existing text parser (expects one line with grams)
-    parsed = parse_recipe_text(raw)
-    if parsed["ingredients"]:
-        item = parsed["ingredients"][0]
-        return {
-            "name": item["name"],
-            "target_g": float(item.get("target_g") or 0),
-            "raw": raw,
-        }
-    return {"name": _clean_name(raw), "target_g": 0.0, "raw": raw}
+    name = _clean_name(raw)
+    return {
+        "name": name,
+        "target_g": 0.0,
+        "raw": raw,
+        "skippable": is_skippable_ingredient(name, raw),
+    }
+
+
+def parse_recipe_lines(text: str, default_title: str = "Custom recipe") -> dict:
+    """Parse pasted multi-line recipe text using the same rules as URL scrape."""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    title = default_title
+    if not lines:
+        return {"title": title, "ingredients": []}
+
+    first = lines[0]
+    if not re.search(r"\d", first) and len(lines) > 1:
+        title = first.lstrip("#").strip() or title
+        lines = lines[1:]
+
+    ingredients = [parse_ingredient_string(line) for line in lines]
+    return {"title": title, "ingredients": ingredients}
 
 
 def _fetch_html(url: str) -> bytes:
@@ -183,7 +249,6 @@ def scrape_recipe_url(url: str) -> dict:
     scraper = None
     last_err = None
 
-    # Prefer fetching with a browser UA, then parse HTML (avoids many 403s)
     try:
         html = _fetch_html(url)
         scraper = scrape_html(html, org_url=url)

@@ -1,0 +1,21 @@
+[Unit]
+Description=Smart Kitchen Scale Flask Hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=elliotkaiser
+Group=elliotkaiser
+WorkingDirectory=/home/elliotkaiser/scale
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/elliotkaiser/scale/.env
+ExecStart=/home/elliotkaiser/scale/venv/bin/python /home/elliotkaiser/scale/app.py
+Restart=on-failure
+RestartSec=5
+
+# GPIO / I2C access for HX711, OLED, buttons
+SupplementaryGroups=gpio i2c dialout
+
+[Install]
+WantedBy=multi-user.target

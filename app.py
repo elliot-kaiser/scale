@@ -11,6 +11,7 @@ from display_manager import ScaleHardwareManager, G_TO_OZ
 import local_store
 import cloud
 import recipe_math
+import weight_plan
 
 cloud.load_dotenv()
 supabase = cloud.get_client()
@@ -35,6 +36,11 @@ print("Load cell zeroed!")
 # Shared state
 state_lock = threading.RLock()
 latest_weight_g = 0.0
+_smooth_weight_g = 0.0
+
+# Noise filter (grams) — keep responsive; only kill single-sample blips
+WEIGHT_OUTLIER_G = 25.0
+WEIGHT_EMA_ALPHA = 0.55
 
 # Cook session phases: ingredients → cooked → portion → done
 cook_session = {
@@ -56,13 +62,22 @@ cook_session = {
 
 
 def get_live_weight_g():
-    """Median-filtered weight reader passed into display manager loop."""
-    global latest_weight_g
+    """Median + outlier reject + light EMA (keeps responsive, cuts blips)."""
+    global latest_weight_g, _smooth_weight_g
     try:
         readings = [hx.get_weight(1) for _ in range(5)]
-        weight = max(0.0, statistics.median(readings))
+        med = statistics.median(readings)
+        tight = [r for r in readings if abs(r - med) <= WEIGHT_OUTLIER_G]
+        if len(tight) >= 3:
+            med = statistics.median(tight)
+
+        with state_lock:
+            prev = _smooth_weight_g
+        smoothed = WEIGHT_EMA_ALPHA * med + (1.0 - WEIGHT_EMA_ALPHA) * prev
+        weight = max(0.0, smoothed)
         with state_lock:
             latest_weight_g = weight
+            _smooth_weight_g = weight
         return weight
     except Exception as e:
         print(f"Weight read error: {e}")
@@ -71,8 +86,12 @@ def get_live_weight_g():
 
 def execute_tare():
     """Called when physical Tare button is pressed or via Web UI."""
+    global latest_weight_g, _smooth_weight_g
     try:
         hx.tare()
+        with state_lock:
+            latest_weight_g = 0.0
+            _smooth_weight_g = 0.0
         print("Scale Tared!")
     except Exception as e:
         print(f"Tare error: {e}")
@@ -116,6 +135,9 @@ def _enrich_ingredients(raw_items):
                 "carbs_per_100g": carbs,
                 "fat_per_100g": fat,
                 "matched": bool(food) and (cal > 0 or protein > 0 or carbs > 0 or fat > 0),
+                "skippable": bool(item.get("skippable")),
+                "skipped": bool(item.get("skipped")),
+                "raw": item.get("raw") or name,
             }
         )
     return enriched
@@ -204,8 +226,12 @@ def _clear_cook_session(mark_completed=False):
     hw.clear_guided_mode()
 
 
-def confirm_cook_step(weight_g=None):
-    """Confirm current scale reading for the active cook phase and advance."""
+def confirm_cook_step(weight_g=None, skip=False):
+    """Confirm current scale reading for the active cook phase and advance.
+
+    skip=True: skip weighing this ingredient (seasonings). Uses estimated
+    target_g for macros when available.
+    """
     if weight_g is None:
         with state_lock:
             weight_g = latest_weight_g
@@ -222,10 +248,17 @@ def confirm_cook_step(weight_g=None):
         ings = cook_session["ingredients"]
         if not ings or idx >= len(ings):
             return {"status": "error", "message": "No active ingredient"}
-        if weight_g <= 0:
-            return {"status": "error", "message": "Place ingredient on scale first"}
 
-        ings[idx]["actual_g"] = round(weight_g, 1)
+        if skip:
+            estimate = float(ings[idx].get("target_g") or 0)
+            ings[idx]["actual_g"] = round(estimate, 1)
+            ings[idx]["skipped"] = True
+        else:
+            if weight_g <= 0:
+                return {"status": "error", "message": "Place ingredient on scale first"}
+            ings[idx]["actual_g"] = round(weight_g, 1)
+            ings[idx]["skipped"] = False
+
         next_index = idx + 1
         if next_index < len(ings):
             _show_ingredient_step(next_index)
@@ -462,8 +495,12 @@ def api_clear_guided():
 def api_confirm_cook_step():
     data = request.json or {}
     weight = data.get("weight_g")
+    skip = bool(data.get("skip"))
     with state_lock:
-        result = confirm_cook_step(None if weight is None else float(weight))
+        result = confirm_cook_step(
+            None if weight is None else float(weight),
+            skip=skip,
+        )
         session = _session_public()
     if result.get("status") == "error":
         return jsonify({**result, "cook": session}), 400
@@ -505,7 +542,7 @@ def api_search_ingredients():
 @app.route("/api/ingredients", methods=["GET", "POST"])
 def api_ingredients():
     if request.method == "GET":
-        remote = cloud.search_foods("", limit=200)
+        remote = cloud.search_foods("", limit=500)
         if remote is not None:
             return jsonify(remote)
         return jsonify(local_store.list_foods())
@@ -518,6 +555,179 @@ def api_ingredients():
 
     cloud.upsert_food(entry)
     return jsonify({"status": "success", "food": entry})
+
+
+@app.route("/api/ingredients/<food_id>", methods=["PUT", "PATCH", "DELETE"])
+def api_ingredient_item(food_id):
+    if request.method == "DELETE":
+        local = local_store.get_food(food_id)
+        ok = local_store.delete_food(food_id)
+        if local:
+            cloud.delete_food(food_id=local.get("id") if _is_intish(local.get("id")) else None, name=local.get("name"))
+        elif _is_intish(food_id):
+            cloud.delete_food(food_id=int(food_id))
+        if not ok and not cloud.is_configured():
+            return jsonify({"status": "error", "message": "Food not found"}), 404
+        return jsonify({"status": "success"})
+
+    data = request.json or {}
+    # Accept either per_100g fields or calories/protein form fields
+    entry = local_store.update_food(food_id, data)
+    if entry:
+        cloud.upsert_food(entry)
+        return jsonify({"status": "success", "food": entry})
+
+    # Cloud-only id (bigint from Supabase list)
+    if cloud.is_configured() and _is_intish(food_id):
+        patch = {}
+        if "name" in data:
+            patch["name"] = data["name"]
+        for key in ("calories_per_100g", "protein_per_100g", "carbs_per_100g", "fat_per_100g", "barcode"):
+            if key in data:
+                patch[key] = data[key]
+        if "calories" in data and "calories_per_100g" not in patch:
+            patch["calories_per_100g"] = data["calories"]
+            patch["protein_per_100g"] = data.get("protein", 0)
+            patch["carbs_per_100g"] = data.get("carbs", 0)
+            patch["fat_per_100g"] = data.get("fat", 0)
+        cloud.update_food(int(food_id), patch)
+        return jsonify({"status": "success", "food": {"id": food_id, **patch}})
+
+    return jsonify({"status": "error", "message": "Food not found"}), 404
+
+
+def _is_intish(value):
+    try:
+        int(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+@app.route("/api/meals/<meal_id>", methods=["PUT", "PATCH", "DELETE"])
+def api_meal_item(meal_id):
+    if request.method == "DELETE":
+        local_store.delete_meal(meal_id)
+        if cloud.is_configured() and _is_intish(meal_id):
+            cloud.delete_meal(int(meal_id))
+        return jsonify({"status": "success"})
+
+    data = request.json or {}
+    entry = local_store.update_meal(meal_id, data)
+    if cloud.is_configured() and _is_intish(meal_id):
+        cloud.update_meal(int(meal_id), data)
+    if entry is None and not (cloud.is_configured() and _is_intish(meal_id)):
+        return jsonify({"status": "error", "message": "Meal not found"}), 404
+    return jsonify({"status": "success", "meal": entry or data})
+
+
+@app.route("/api/targets", methods=["GET", "PUT", "POST"])
+def api_targets():
+    if request.method == "GET":
+        remote = cloud.get_targets()
+        if remote:
+            local_store.set_targets(remote)
+        return jsonify(local_store.get_targets())
+
+    data = request.get_json(silent=True) or {}
+    targets = local_store.set_targets(data)
+    cloud.set_targets(targets)
+    return jsonify({"status": "success", "targets": targets})
+
+
+def _day_rows_for_plan(days: int = 35):
+    remote_meals = cloud.fetch_meals()
+    remote_bw = cloud.fetch_body_weights()
+    if remote_meals is not None and remote_bw is not None:
+        return local_store.daily_summary(days, meals=remote_meals, body_weights=remote_bw)
+    return local_store.daily_summary(days)
+
+
+@app.route("/api/weight_plan", methods=["GET", "PUT", "POST"])
+def api_weight_plan():
+    """Trend analysis + optional goal calorie recommendation."""
+    if request.method in ("PUT", "POST"):
+        data = request.get_json(silent=True) or {}
+        goal = local_store.set_weight_goal(data)
+    else:
+        goal = local_store.get_weight_goal()
+
+    try:
+        lookback = int(request.args.get("days", 30))
+    except ValueError:
+        lookback = 30
+    lookback = max(7, min(lookback, 90))
+
+    excluded = local_store.get_plan_excluded_dates()
+    rows = _day_rows_for_plan(lookback + 5)
+    plan = weight_plan.analyze_weight_plan(
+        rows,
+        goal_weight_lbs=goal.get("goal_weight_lbs"),
+        goal_date=goal.get("goal_date"),
+        lookback_days=lookback,
+        excluded_dates=excluded,
+    )
+    plan["saved_goal"] = goal
+    return jsonify(plan)
+
+
+@app.route("/api/weight_plan/exclude_day", methods=["POST"])
+def api_weight_plan_exclude_day():
+    """Toggle or set whether a day's calories count in the weight plan."""
+    data = request.get_json(silent=True) or {}
+    date_str = data.get("date")
+    if not date_str:
+        return jsonify({"status": "error", "message": "date required"}), 400
+    excluded = data.get("excluded")
+    if excluded is not None:
+        excluded = bool(excluded)
+    try:
+        result = local_store.toggle_plan_excluded_date(date_str, excluded)
+    except ValueError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+
+    goal = local_store.get_weight_goal()
+    rows = _day_rows_for_plan(35)
+    plan = weight_plan.analyze_weight_plan(
+        rows,
+        goal_weight_lbs=goal.get("goal_weight_lbs"),
+        goal_date=goal.get("goal_date"),
+        lookback_days=30,
+        excluded_dates=result["excluded_dates"],
+    )
+    plan["saved_goal"] = goal
+    return jsonify({"status": "success", **result, "plan": plan})
+
+
+@app.route("/api/weight_plan/apply_calories", methods=["POST"])
+def api_weight_plan_apply():
+    """Set daily calorie target from the plan recommendation; keep macro %."""
+    data = request.get_json(silent=True) or {}
+    calories = data.get("calories")
+    if calories is None:
+        return jsonify({"status": "error", "message": "calories required"}), 400
+    current = local_store.get_targets()
+    targets = local_store.set_targets(
+        {
+            "target_calories": float(calories),
+            "percent_protein": current.get("percent_protein"),
+            "percent_carbs": current.get("percent_carbs"),
+            "percent_fat": current.get("percent_fat"),
+        }
+    )
+    cloud.set_targets(targets)
+    return jsonify({"status": "success", "targets": targets})
+
+
+@app.route("/api/today", methods=["GET"])
+def api_today():
+    remote_meals = cloud.fetch_meals()
+    remote_targets = cloud.get_targets()
+    if remote_targets:
+        local_store.set_targets(remote_targets)
+    targets = local_store.get_targets()
+    progress = local_store.today_progress(meals=remote_meals, targets=targets)
+    return jsonify(progress)
 
 
 @app.route("/api/foods/from_barcode", methods=["POST"])
@@ -597,10 +807,96 @@ def api_food_scan_status():
 @app.route("/api/log_meal", methods=["POST"])
 def api_log_meal():
     data = request.json or {}
+    # Allow quick-log by food id + optional weight (defaults to live scale)
+    food_id = data.get("food_id") or data.get("ingredient_id")
+    if food_id is not None and data.get("calories") is None:
+        food = None
+        for f in _food_catalog():
+            if str(f.get("id")) == str(food_id):
+                food = f
+                break
+        if not food:
+            return jsonify({"status": "error", "message": "Food not found"}), 404
+        weight_g = data.get("weight_g")
+        if weight_g is None:
+            with state_lock:
+                weight_g = latest_weight_g
+        weight_g = float(weight_g or 0)
+        if weight_g <= 0:
+            return jsonify({"status": "error", "message": "Place food on the scale first"}), 400
+        factor = weight_g / 100.0
+        data = {
+            "food_name": food.get("name"),
+            "ingredient_id": food.get("id"),
+            "weight_g": round(weight_g, 1),
+            "calories": round(float(food.get("calories_per_100g") or 0) * factor, 1),
+            "protein": round(float(food.get("protein_per_100g") or 0) * factor, 1),
+            "carbs": round(float(food.get("carbs_per_100g") or 0) * factor, 1),
+            "fat": round(float(food.get("fat_per_100g") or 0) * factor, 1),
+        }
+
     entry = local_store.add_meal(data)
     print(f"Logged Meal to Scale: {entry}")
     cloud.insert_meal(entry)
     return jsonify({"status": "success", "message": "Meal logged!", "entry": entry})
+
+
+@app.route("/api/recent_foods", methods=["GET"])
+def api_recent_foods():
+    try:
+        limit = int(request.args.get("limit", 8))
+    except ValueError:
+        limit = 8
+    limit = max(1, min(limit, 20))
+    remote = cloud.fetch_meals()
+    foods = _food_catalog()
+    items = local_store.recent_foods_for_quick_log(
+        limit=limit,
+        foods=foods,
+        meals=remote if remote is not None else None,
+    )
+    return jsonify({"foods": items})
+
+
+@app.route("/api/weekly_review", methods=["GET"])
+def api_weekly_review():
+    try:
+        days = int(request.args.get("days", 7))
+    except ValueError:
+        days = 7
+    days = max(1, min(days, 30))
+
+    remote_meals = cloud.fetch_meals()
+    remote_bw = cloud.fetch_body_weights()
+    remote_targets = cloud.get_targets()
+    if remote_targets:
+        local_store.set_targets(remote_targets)
+    targets = local_store.get_targets()
+    excluded = local_store.get_plan_excluded_dates()
+
+    if remote_meals is not None and remote_bw is not None:
+        rows = local_store.daily_summary(max(days, 35), meals=remote_meals, body_weights=remote_bw)
+    else:
+        rows = local_store.daily_summary(max(days, 35))
+
+    plan = weight_plan.analyze_weight_plan(
+        rows,
+        lookback_days=30,
+        excluded_dates=excluded,
+    )
+    maintenance = None
+    if plan.get("trend") and plan["trend"].get("maintenance_calories") is not None:
+        maintenance = plan["trend"]["maintenance_calories"]
+
+    review = weight_plan.weekly_review(
+        rows,
+        targets,
+        days=days,
+        excluded_dates=excluded,
+        maintenance_calories=maintenance,
+    )
+    review["plan_ok"] = plan.get("ok")
+    return jsonify(review)
 
 
 @app.route("/api/log_weight", methods=["POST"])
@@ -622,10 +918,31 @@ def api_daily_summary():
 
     remote_meals = cloud.fetch_meals()
     remote_bw = cloud.fetch_body_weights()
+    remote_targets = cloud.get_targets()
+    if remote_targets:
+        local_store.set_targets(remote_targets)
+    targets = local_store.get_targets()
+
     if remote_meals is not None and remote_bw is not None:
         rows = local_store.daily_summary(days, meals=remote_meals, body_weights=remote_bw)
-        return jsonify({"days": rows, "source": "supabase"})
-    return jsonify({"days": local_store.daily_summary(days), "source": "local"})
+        progress = local_store.today_progress(meals=remote_meals, targets=targets)
+        return jsonify({
+            "days": rows,
+            "source": "supabase",
+            "targets": targets,
+            "today": progress,
+            "plan_excluded_dates": local_store.get_plan_excluded_dates(),
+        })
+
+    rows = local_store.daily_summary(days)
+    progress = local_store.today_progress(targets=targets)
+    return jsonify({
+        "days": rows,
+        "source": "local",
+        "targets": targets,
+        "today": progress,
+        "plan_excluded_dates": local_store.get_plan_excluded_dates(),
+    })
 
 
 @app.route("/api/daily_detail", methods=["GET"])
@@ -636,13 +953,14 @@ def api_daily_detail():
 
     remote_meals = cloud.fetch_meals()
     remote_bw = cloud.fetch_body_weights()
+    excluded = set(local_store.get_plan_excluded_dates())
     if remote_meals is not None and remote_bw is not None:
         detail = local_store.day_detail(date_str, meals=remote_meals, body_weights=remote_bw)
         detail["source"] = "supabase"
-        return jsonify(detail)
-
-    detail = local_store.day_detail(date_str)
-    detail["source"] = "local"
+    else:
+        detail = local_store.day_detail(date_str)
+        detail["source"] = "local"
+    detail["plan_excluded"] = date_str in excluded
     return jsonify(detail)
 
 
@@ -677,7 +995,7 @@ def api_parse_recipe():
         if url:
             parsed = recipe_scrape.scrape_recipe_url(url)
         else:
-            parsed = recipe_math.parse_recipe_text(text, default_title=title)
+            parsed = recipe_scrape.parse_recipe_lines(text, default_title=title)
     except ValueError as e:
         return jsonify({"status": "error", "message": str(e)}), 400
     except Exception as e:

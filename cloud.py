@@ -392,3 +392,110 @@ def update_guided_session(session_id, patch: dict):
         lambda c: c.table("guided_sessions").update(patch).eq("id", session_id).execute(),
         "guided session update",
     )
+
+
+def get_targets():
+    client = get_client()
+    if not client:
+        return None
+    try:
+        res = client.table("user_targets").select("*").eq("id", 1).limit(1).execute()
+        if not res.data:
+            return None
+        row = res.data[0]
+        out = {
+            "target_calories": float(row.get("target_calories") or 0),
+            "target_protein": float(row.get("target_protein") or 0),
+            "target_carbs": float(row.get("target_carbs") or 0),
+            "target_fat": float(row.get("target_fat") or 0),
+        }
+        # Only pass percents through if the table actually has them stored
+        if row.get("percent_protein") is not None:
+            out["percent_protein"] = float(row.get("percent_protein") or 0)
+            out["percent_carbs"] = float(row.get("percent_carbs") or 0)
+            out["percent_fat"] = float(row.get("percent_fat") or 0)
+        return out
+    except Exception as e:
+        print(f"Supabase get targets error: {e}")
+        return None
+
+
+def set_targets(payload: dict):
+    client = get_client()
+    if not client:
+        return None
+    row = {
+        "id": 1,
+        "target_calories": float(payload.get("target_calories") or 0),
+        "target_protein": float(payload.get("target_protein") or 0),
+        "target_carbs": float(payload.get("target_carbs") or 0),
+        "target_fat": float(payload.get("target_fat") or 0),
+    }
+    return _safe(
+        lambda c: c.table("user_targets").upsert(row, on_conflict="id").execute(),
+        "targets upsert",
+    )
+
+
+def update_meal(meal_id, payload: dict):
+    client = get_client()
+    if not client:
+        return None
+    patch = {}
+    for key in ("food_name", "weight_g", "calories", "protein", "carbs", "fat"):
+        if key in payload and payload[key] is not None:
+            patch[key] = payload[key]
+    if "date" in payload and payload["date"]:
+        patch["log_date"] = payload["date"]
+    if not patch:
+        return None
+    return _safe(
+        lambda c: c.table("daily_logs").update(patch).eq("id", meal_id).execute(),
+        "meal update",
+    )
+
+
+def delete_meal(meal_id):
+    return _safe(
+        lambda c: c.table("daily_logs").delete().eq("id", meal_id).execute(),
+        "meal delete",
+    )
+
+
+def update_food(food_id, payload: dict):
+    client = get_client()
+    if not client:
+        return None
+    patch = {}
+    mapping = {
+        "name": "name",
+        "barcode": "barcode",
+        "calories_per_100g": "calories_per_100g",
+        "protein_per_100g": "protein_per_100g",
+        "carbs_per_100g": "carbs_per_100g",
+        "fat_per_100g": "fat_per_100g",
+    }
+    for src, dest in mapping.items():
+        if src in payload and payload[src] is not None:
+            patch[dest] = payload[src]
+    if not patch:
+        return None
+    return _safe(
+        lambda c: c.table("ingredients").update(patch).eq("id", food_id).execute(),
+        "food update",
+    )
+
+
+def delete_food(food_id=None, name=None):
+    client = get_client()
+    if not client:
+        return None
+    try:
+        if food_id is not None:
+            return client.table("ingredients").delete().eq("id", food_id).execute()
+        if name:
+            return client.table("ingredients").delete().eq("name", name).execute()
+    except Exception as e:
+        print(f"Supabase food delete error: {e}")
+    return None
+
