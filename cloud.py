@@ -7,10 +7,22 @@ user_targets, guided_sessions
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 _client = None
 _init_error = None
+_health = {
+    "ok": None,
+    "writable": None,
+    "error": None,
+    "hint": None,
+    "checked_at": None,
+    "skip_reads_until": 0.0,
+}
+
+# After a cloud failure, skip remote reads briefly and use local data.
+_READ_COOLDOWN_S = 45.0
 
 
 def load_dotenv(path=None):
@@ -57,11 +69,127 @@ def is_configured():
     return get_client() is not None
 
 
+def _set_health(*, ok=None, writable=None, error=None, hint=None):
+    now = time.time()
+    if ok is not None:
+        _health["ok"] = bool(ok)
+    if writable is not None:
+        _health["writable"] = bool(writable)
+    if error is not None:
+        _health["error"] = str(error) if error else None
+    if hint is not None:
+        _health["hint"] = hint
+    _health["checked_at"] = now
+    if _health["ok"] is False:
+        _health["skip_reads_until"] = now + _READ_COOLDOWN_S
+    elif _health["ok"] is True:
+        _health["skip_reads_until"] = 0.0
+
+
+def _hint_for_error(message: str) -> str:
+    text = (message or "").lower()
+    if "403" in text or "forbidden" in text or "row-level security" in text or "rls" in text:
+        return (
+            "Supabase blocked the anon key (RLS/grants). "
+            "Run supabase_schema.sql in the Supabase SQL Editor, then tap Test connection."
+        )
+    if "jwt" in text or "api key" in text or "invalid" in text:
+        return "Check SUPABASE_URL and SUPABASE_KEY (anon) in .env on the Pi."
+    return "Cloud unavailable — app keeps using local data/logs.json."
+
+
+def _record_failure(label: str, error) -> None:
+    message = f"{label}: {error}"
+    print(f"Supabase {message}")
+    _set_health(ok=False, writable=False, error=message, hint=_hint_for_error(str(error)))
+
+
+def reads_enabled() -> bool:
+    """Whether remote reads should be attempted right now."""
+    if not is_configured():
+        return False
+    mode = (os.environ.get("CLOUD_READS") or "auto").strip().lower()
+    if mode in ("0", "off", "false", "no", "local"):
+        return False
+    if mode in ("1", "on", "true", "yes", "force", "always"):
+        return True
+    # auto
+    if _health["ok"] is False and time.time() < float(_health.get("skip_reads_until") or 0):
+        return False
+    return True
+
+
+def health_check(force: bool = False) -> dict:
+    """Probe read + write access. Safe to call from UI."""
+    client = get_client()
+    if not client:
+        _set_health(
+            ok=False,
+            writable=False,
+            error=_init_error or "Not configured",
+            hint="Add SUPABASE_URL and SUPABASE_KEY to .env",
+        )
+        return status()
+
+    stale = True
+    checked = _health.get("checked_at")
+    if checked and (time.time() - float(checked)) < 8 and not force:
+        stale = False
+    if not stale and _health.get("ok") is not None and not force:
+        return status()
+
+    # Read probe
+    try:
+        client.table("ingredients").select("id").limit(1).execute()
+        read_ok = True
+    except Exception as e:
+        _record_failure("health read", e)
+        return status()
+
+    # Write probe: upsert a tiny marker row (unique name), then leave it.
+    writable = False
+    try:
+        client.table("ingredients").upsert(
+            {
+                "name": "__scale_healthcheck__",
+                "calories_per_100g": 0,
+                "protein_per_100g": 0,
+                "carbs_per_100g": 0,
+                "fat_per_100g": 0,
+            },
+            on_conflict="name",
+        ).execute()
+        writable = True
+    except Exception as e:
+        _set_health(
+            ok=True,
+            writable=False,
+            error=f"health write: {e}",
+            hint=_hint_for_error(str(e)),
+        )
+        return status()
+
+    _set_health(ok=read_ok, writable=writable, error=None, hint=None)
+    return status()
+
+
 def status():
     client = get_client()
+    configured = client is not None
+    # Lazy first probe so the pill is accurate after boot
+    if configured and _health.get("ok") is None:
+        try:
+            health_check(force=True)
+        except Exception:
+            pass
     return {
-        "configured": client is not None,
-        "error": _init_error,
+        "configured": configured,
+        "ok": _health.get("ok"),
+        "writable": _health.get("writable"),
+        "error": _health.get("error") or _init_error,
+        "hint": _health.get("hint"),
+        "checked_at": _health.get("checked_at"),
+        "reads_enabled": reads_enabled(),
         "url": (os.environ.get("SUPABASE_URL") or "").strip() or None,
         "schema": "ingredients / daily_logs / weight_logs",
     }
@@ -72,9 +200,12 @@ def _safe(action, label):
     if not client:
         return None
     try:
-        return action(client)
+        result = action(client)
+        if _health.get("ok") is not True:
+            _set_health(ok=True, error=None, hint=None)
+        return result
     except Exception as e:
-        print(f"Supabase {label} error: {e}")
+        _record_failure(label, e)
         return None
 
 
@@ -141,6 +272,8 @@ def upsert_food(entry: dict):
 
 
 def search_foods(query: str, limit: int = 20):
+    if not reads_enabled():
+        return None
     client = get_client()
     if not client:
         return None
@@ -162,9 +295,11 @@ def search_foods(query: str, limit: int = 20):
                 .limit(limit)
                 .execute()
             )
+        if _health.get("ok") is not True:
+            _set_health(ok=True, error=None, hint=None)
         return [normalize_food(r) for r in (res.data or [])]
     except Exception as e:
-        print(f"Supabase food search error: {e}")
+        _record_failure("food search", e)
         return None
 
 
@@ -197,49 +332,72 @@ def insert_body_weight(entry: dict):
 
 
 def fetch_meals():
+    if not reads_enabled():
+        return None
     client = get_client()
     if not client:
         return None
     try:
         res = client.table("daily_logs").select("*").order("created_at").execute()
+        if _health.get("ok") is not True:
+            _set_health(ok=True, error=None, hint=None)
         return [normalize_meal(r) for r in (res.data or [])]
     except Exception as e:
-        print(f"Supabase fetch meals error: {e}")
+        _record_failure("fetch meals", e)
         return None
 
 
 def fetch_body_weights():
+    if not reads_enabled():
+        return None
     client = get_client()
     if not client:
         return None
     try:
         res = client.table("weight_logs").select("*").order("created_at").execute()
+        if _health.get("ok") is not True:
+            _set_health(ok=True, error=None, hint=None)
         return [normalize_body_weight(r) for r in (res.data or [])]
     except Exception as e:
-        print(f"Supabase fetch body weights error: {e}")
+        _record_failure("fetch body weights", e)
         return None
 
 
 def sync_local_foods_to_cloud(foods: list):
     """Push local food catalog to Supabase (upsert by name)."""
     if not get_client():
-        return 0
-    count = 0
-    for food in foods:
+        return {"synced": 0, "failed": len(foods or []), "error": _init_error or "Not configured"}
+    synced = 0
+    failed = 0
+    last_error = None
+    for food in foods or []:
         if upsert_food(food) is not None:
-            count += 1
-    return count
+            synced += 1
+        else:
+            failed += 1
+            last_error = _health.get("error")
+    return {
+        "synced": synced,
+        "failed": failed,
+        "error": last_error,
+        "writable": _health.get("writable"),
+        "hint": _health.get("hint"),
+    }
 
 
 def list_recipes():
+    if not reads_enabled():
+        return None
     client = get_client()
     if not client:
         return None
     try:
         res = client.table("recipes").select("*").order("name").execute()
+        if _health.get("ok") is not True:
+            _set_health(ok=True, error=None, hint=None)
         return res.data or []
     except Exception as e:
-        print(f"Supabase list recipes error: {e}")
+        _record_failure("list recipes", e)
         return None
 
 
@@ -395,6 +553,8 @@ def update_guided_session(session_id, patch: dict):
 
 
 def get_targets():
+    if not reads_enabled():
+        return None
     client = get_client()
     if not client:
         return None
@@ -402,6 +562,8 @@ def get_targets():
         res = client.table("user_targets").select("*").eq("id", 1).limit(1).execute()
         if not res.data:
             return None
+        if _health.get("ok") is not True:
+            _set_health(ok=True, error=None, hint=None)
         row = res.data[0]
         out = {
             "target_calories": float(row.get("target_calories") or 0),
@@ -416,7 +578,7 @@ def get_targets():
             out["percent_fat"] = float(row.get("percent_fat") or 0)
         return out
     except Exception as e:
-        print(f"Supabase get targets error: {e}")
+        _record_failure("get targets", e)
         return None
 
 

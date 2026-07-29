@@ -3,8 +3,13 @@ import time
 import threading
 import statistics
 import base64
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, Response, send_from_directory
 import RPi.GPIO as GPIO
+import csv
+import io
+import json
+from datetime import datetime, timedelta
+from pathlib import Path
 
 from hx711 import HX711
 from display_manager import ScaleHardwareManager, G_TO_OZ
@@ -24,10 +29,22 @@ print(f"Food database ready: {_seed_info['total']} foods (+{_seed_info['added']}
 
 app = Flask(__name__)
 
+
+@app.route("/sw.js")
+def service_worker():
+    """Serve SW from site root so it can control the whole origin."""
+    resp = send_from_directory(Path(app.root_path) / "static", "sw.js", mimetype="application/javascript")
+    resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 # --- HX711 HARDWARE INITIALIZATION ---
 hx = HX711(dout_pin=5, pd_sck_pin=6)
-REFERENCE_UNIT = float(os.environ.get("REFERENCE_UNIT", "420.0"))
+_env_ref = float(os.environ.get("REFERENCE_UNIT", "420.0"))
+REFERENCE_UNIT = local_store.get_saved_reference_unit(_env_ref)
 hx.set_reference_unit(REFERENCE_UNIT)
+print(f"Load cell reference unit: {REFERENCE_UNIT}")
 
 print("Zeroing load cell on boot...")
 hx.tare()
@@ -98,9 +115,7 @@ def execute_tare():
 
 
 def _food_catalog():
-    remote = cloud.search_foods("", limit=500)
-    if remote is not None:
-        return remote
+    # Always prefer on-device foods for weighing/logging (stable UUID ids).
     return local_store.list_foods()
 
 
@@ -523,28 +538,40 @@ def api_calibrate():
     previous_reference = hx.SCALE
     new_reference = hx.SCALE * (measured / known_weight_g)
     hx.set_reference_unit(new_reference)
+    local_store.set_saved_reference_unit(new_reference)
     return jsonify({
         "status": "success",
         "reference_unit": round(new_reference, 2),
         "previous_reference_unit": round(previous_reference, 2),
+        "persisted": True,
+    })
+
+
+@app.route("/api/calibration", methods=["GET"])
+def api_calibration():
+    return jsonify({
+        "reference_unit": round(float(hx.SCALE or 0), 2),
+        "saved_reference_unit": round(local_store.get_saved_reference_unit(REFERENCE_UNIT), 2),
     })
 
 
 @app.route("/api/ingredients/search", methods=["GET"])
 def api_search_ingredients():
     query = request.args.get("q", "").strip()
-    remote = cloud.search_foods(query, limit=20)
-    if remote is not None:
-        return jsonify(remote)
+    # Prefer local catalog so Log/Quick-log ids match Manage foods.
     return jsonify(local_store.search_foods(query, limit=20))
 
 
 @app.route("/api/ingredients", methods=["GET", "POST"])
 def api_ingredients():
     if request.method == "GET":
-        remote = cloud.search_foods("", limit=500)
-        if remote is not None:
-            return jsonify(remote)
+        # Default to on-device store (UUID ids). Optional ?source=cloud for debugging.
+        source = (request.args.get("source") or "local").strip().lower()
+        if source in ("cloud", "remote", "supabase"):
+            remote = cloud.search_foods("", limit=500)
+            if remote is not None:
+                return jsonify(remote)
+            return jsonify({"status": "error", "message": cloud.status().get("error") or "Cloud unavailable"}), 502
         return jsonify(local_store.list_foods())
 
     data = request.json or {}
@@ -561,12 +588,25 @@ def api_ingredients():
 def api_ingredient_item(food_id):
     if request.method == "DELETE":
         local = local_store.get_food(food_id)
-        ok = local_store.delete_food(food_id)
+        # Also allow delete by exact name if id is unknown
+        if not local and request.args.get("name"):
+            name = request.args.get("name")
+            for f in local_store.list_foods():
+                if (f.get("name") or "").strip().lower() == name.strip().lower():
+                    local = f
+                    food_id = f.get("id")
+                    break
+        ok = local_store.delete_food(food_id) if food_id is not None else False
         if local:
-            cloud.delete_food(food_id=local.get("id") if _is_intish(local.get("id")) else None, name=local.get("name"))
+            cloud.delete_food(
+                food_id=local.get("id") if _is_intish(local.get("id")) else None,
+                name=local.get("name"),
+            )
         elif _is_intish(food_id):
             cloud.delete_food(food_id=int(food_id))
         if not ok and not cloud.is_configured():
+            return jsonify({"status": "error", "message": "Food not found"}), 404
+        if not ok and not local and not _is_intish(food_id):
             return jsonify({"status": "error", "message": "Food not found"}), 404
         return jsonify({"status": "success"})
 
@@ -590,7 +630,12 @@ def api_ingredient_item(food_id):
             patch["protein_per_100g"] = data.get("protein", 0)
             patch["carbs_per_100g"] = data.get("carbs", 0)
             patch["fat_per_100g"] = data.get("fat", 0)
-        cloud.update_food(int(food_id), patch)
+        updated = cloud.update_food(int(food_id), patch)
+        if updated is None:
+            return jsonify({
+                "status": "error",
+                "message": "Cloud food update failed (check Supabase RLS). Try editing the on-device catalog under Manage foods.",
+            }), 502
         return jsonify({"status": "success", "food": {"id": food_id, **patch}})
 
     return jsonify({"status": "error", "message": "Food not found"}), 404
@@ -833,12 +878,129 @@ def api_log_meal():
             "protein": round(float(food.get("protein_per_100g") or 0) * factor, 1),
             "carbs": round(float(food.get("carbs_per_100g") or 0) * factor, 1),
             "fat": round(float(food.get("fat_per_100g") or 0) * factor, 1),
+            "date": data.get("date"),
         }
 
-    entry = local_store.add_meal(data)
+    date_override = data.get("date")
+    entry = local_store.add_meal(data, date_override=date_override)
     print(f"Logged Meal to Scale: {entry}")
     cloud.insert_meal(entry)
     return jsonify({"status": "success", "message": "Meal logged!", "entry": entry})
+
+
+@app.route("/api/meals/copy_day", methods=["POST"])
+def api_copy_day_meals():
+    """Duplicate all meals from one date onto another (default: today)."""
+    data = request.get_json(silent=True) or {}
+    from_date = (data.get("from_date") or "").strip()
+    to_date = (data.get("to_date") or "").strip() or None
+    if not from_date:
+        # Convenience: copy yesterday → today
+        from_date = (datetime.now().astimezone().date() - timedelta(days=1)).isoformat()
+    try:
+        created = local_store.copy_meals_between_dates(from_date, to_date)
+    except ValueError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+    for entry in created:
+        cloud.insert_meal(entry)
+    return jsonify({
+        "status": "success",
+        "from_date": from_date,
+        "to_date": to_date or datetime.now().astimezone().date().isoformat(),
+        "copied": len(created),
+        "meals": created,
+    })
+
+
+@app.route("/api/body_weights", methods=["GET"])
+def api_body_weights():
+    try:
+        days = int(request.args.get("days", 90))
+    except ValueError:
+        days = 90
+    days = max(1, min(days, 365))
+    cutoff = (datetime.now().astimezone().date() - timedelta(days=days - 1)).isoformat()
+    remote = cloud.fetch_body_weights()
+    rows = remote if remote is not None else local_store.get_body_weights()
+    filtered = [r for r in rows if str(r.get("date") or "") >= cutoff]
+    filtered.sort(key=lambda r: (r.get("date") or "", r.get("logged_at") or ""))
+    return jsonify({"weights": filtered})
+
+
+@app.route("/api/backup", methods=["GET"])
+def api_backup():
+    store = local_store.export_store()
+    stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M")
+    body = json.dumps(store, indent=2)
+    return Response(
+        body,
+        mimetype="application/json",
+        headers={"Content-Disposition": f'attachment; filename="scale-backup-{stamp}.json"'},
+    )
+
+
+@app.route("/api/export.csv", methods=["GET"])
+def api_export_csv():
+    kind = (request.args.get("kind") or "meals").strip().lower()
+    stamp = datetime.now().astimezone().strftime("%Y%m%d")
+    buf = io.StringIO()
+    if kind in ("weights", "body_weights", "weight"):
+        rows = local_store.body_weights_csv_rows()
+        fieldnames = ["date", "logged_at", "weight_lbs"]
+        filename = f"scale-weights-{stamp}.csv"
+    else:
+        rows = local_store.meals_csv_rows()
+        fieldnames = ["date", "logged_at", "food_name", "weight_g", "calories", "protein", "carbs", "fat"]
+        filename = f"scale-meals-{stamp}.csv"
+    writer = csv.DictWriter(buf, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.route("/api/restore", methods=["POST"])
+def api_restore():
+    """Replace local store from uploaded JSON backup. Destructive."""
+    payload = None
+    if request.files.get("file"):
+        raw = request.files["file"].read()
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return jsonify({"status": "error", "message": "Invalid JSON backup file"}), 400
+    else:
+        payload = request.get_json(silent=True)
+    if not payload:
+        return jsonify({"status": "error", "message": "Send JSON body or multipart file"}), 400
+    confirm = request.args.get("confirm") or (payload.get("confirm") if isinstance(payload, dict) else None)
+    # Allow nested backup without confirm key inside store
+    if isinstance(payload, dict) and "meals" not in payload and isinstance(payload.get("store"), dict):
+        confirm = confirm or payload.get("confirm")
+        payload = payload["store"]
+    if str(confirm).lower() not in ("1", "true", "yes"):
+        return jsonify({
+            "status": "error",
+            "message": "Restore is destructive. Pass ?confirm=true or include confirm:true",
+        }), 400
+    try:
+        # Strip non-store confirm if present
+        if isinstance(payload, dict):
+            payload = {k: v for k, v in payload.items() if k != "confirm"}
+        store = local_store.replace_store(payload)
+    except ValueError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+    return jsonify({
+        "status": "success",
+        "meals": len(store.get("meals") or []),
+        "body_weights": len(store.get("body_weights") or []),
+        "foods": len(store.get("foods") or []),
+        "recipes": len(store.get("recipes") or []),
+    })
 
 
 @app.route("/api/recent_foods", methods=["GET"])
@@ -966,15 +1128,29 @@ def api_daily_detail():
 
 @app.route("/api/cloud/status", methods=["GET"])
 def api_cloud_status():
+    force = str(request.args.get("refresh") or "").lower() in ("1", "true", "yes")
+    if force:
+        return jsonify(cloud.health_check(force=True))
     return jsonify(cloud.status())
+
+
+@app.route("/api/cloud/test", methods=["POST"])
+def api_cloud_test():
+    return jsonify({"status": "success", **cloud.health_check(force=True)})
 
 
 @app.route("/api/cloud/sync_foods", methods=["POST"])
 def api_sync_foods():
     if not cloud.is_configured():
         return jsonify({"status": "error", "message": "Supabase not configured"}), 400
-    count = cloud.sync_local_foods_to_cloud(local_store.list_foods())
-    return jsonify({"status": "success", "synced": count})
+    result = cloud.sync_local_foods_to_cloud(local_store.list_foods())
+    if result.get("synced", 0) <= 0 and result.get("failed", 0) > 0:
+        return jsonify({
+            "status": "error",
+            "message": result.get("error") or "Cloud sync failed",
+            **result,
+        }), 502
+    return jsonify({"status": "success", **result})
 
 
 @app.route("/api/recipe/parse", methods=["POST"])
@@ -1024,9 +1200,11 @@ def api_seed_common_foods():
     info = local_store.ensure_common_foods()
     payload = request.get_json(silent=True) or {}
     synced = 0
+    sync_meta = {}
     if cloud.is_configured() and payload.get("sync", True):
-        synced = cloud.sync_local_foods_to_cloud(local_store.list_foods())
-    return jsonify({"status": "success", **info, "synced": synced})
+        sync_meta = cloud.sync_local_foods_to_cloud(local_store.list_foods())
+        synced = sync_meta.get("synced", 0)
+    return jsonify({"status": "success", **info, "synced": synced, **sync_meta})
 
 
 @app.route("/api/recipes", methods=["GET", "POST"])

@@ -191,15 +191,39 @@ def update_food(food_id, payload: dict) -> dict | None:
             if str(food.get("id")) != str(food_id):
                 continue
             merged = {**food, **payload, "id": food.get("id")}
-            if any(k in payload for k in ("calories", "protein", "carbs", "fat", "basis", "serving_size_g", "name")):
+            if any(
+                k in payload
+                for k in (
+                    "calories",
+                    "protein",
+                    "carbs",
+                    "fat",
+                    "calories_per_100g",
+                    "protein_per_100g",
+                    "carbs_per_100g",
+                    "fat_per_100g",
+                    "basis",
+                    "serving_size_g",
+                    "name",
+                )
+            ):
                 try:
+                    # Prefer explicit per_100g fields when present.
+                    calories = payload.get("calories", payload.get("calories_per_100g", merged.get("calories_per_100g")))
+                    protein = payload.get("protein", payload.get("protein_per_100g", merged.get("protein_per_100g")))
+                    carbs = payload.get("carbs", payload.get("carbs_per_100g", merged.get("carbs_per_100g")))
+                    fat = payload.get("fat", payload.get("fat_per_100g", merged.get("fat_per_100g")))
+                    basis = payload.get("basis") or merged.get("basis") or "per_100g"
+                    # If caller sent per_100g keys without basis=per_serving, keep per_100g.
+                    if any(k in payload for k in ("calories_per_100g", "protein_per_100g", "carbs_per_100g", "fat_per_100g")):
+                        basis = "per_100g"
                     normalized = normalize_food_macros({
                         "name": merged.get("name"),
-                        "basis": payload.get("basis") or merged.get("basis") or "per_100g",
-                        "calories": payload.get("calories", merged.get("calories_per_100g")),
-                        "protein": payload.get("protein", merged.get("protein_per_100g")),
-                        "carbs": payload.get("carbs", merged.get("carbs_per_100g")),
-                        "fat": payload.get("fat", merged.get("fat_per_100g")),
+                        "basis": basis,
+                        "calories": calories,
+                        "protein": protein,
+                        "carbs": carbs,
+                        "fat": fat,
                         "serving_size_g": payload.get("serving_size_g", merged.get("serving_size_g") or 100),
                         "barcode": payload.get("barcode", merged.get("barcode")),
                         "id": food.get("id"),
@@ -773,4 +797,131 @@ def save_recipe(payload: dict) -> dict:
             data["recipes"].append(entry)
         _save(data)
     return entry
+
+
+CALIBRATION_PATH = DATA_DIR / "calibration.json"
+
+STORE_LIST_KEYS = (
+    "meals",
+    "body_weights",
+    "foods",
+    "recipes",
+    "plan_excluded_dates",
+    "recent_food_ids",
+)
+STORE_DICT_KEYS = ("targets", "weight_goal")
+
+
+def get_saved_reference_unit(default: float = 420.0) -> float:
+    try:
+        if CALIBRATION_PATH.exists():
+            with CALIBRATION_PATH.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            value = float(data.get("reference_unit"))
+            if value > 0:
+                return value
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        pass
+    return float(default)
+
+
+def set_saved_reference_unit(value: float) -> float:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    unit = float(value)
+    payload = {
+        "reference_unit": unit,
+        "updated_at": datetime.now().astimezone().isoformat(),
+    }
+    with CALIBRATION_PATH.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    return unit
+
+
+def export_store() -> dict:
+    with _lock:
+        data = _load()
+        return json.loads(json.dumps(data))
+
+
+def replace_store(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        raise ValueError("Backup must be a JSON object")
+    store = _empty_store()
+    for key in STORE_LIST_KEYS:
+        value = payload.get(key, store.get(key, []))
+        if not isinstance(value, list):
+            raise ValueError(f"{key} must be a list")
+        store[key] = value
+    for key in STORE_DICT_KEYS:
+        value = payload.get(key, {})
+        if value is None:
+            value = {}
+        if not isinstance(value, dict):
+            raise ValueError(f"{key} must be an object")
+        store[key] = value
+    with _lock:
+        _save(store)
+        return json.loads(json.dumps(store))
+
+
+def copy_meals_between_dates(from_date: str, to_date: str | None = None) -> list:
+    """Clone all meals from from_date onto to_date (default: today)."""
+    if not from_date:
+        raise ValueError("from_date is required")
+    target = to_date or datetime.now().astimezone().date().isoformat()
+    with _lock:
+        data = _load()
+        source = [m for m in data.get("meals", []) if str(m.get("date")) == str(from_date)]
+    if not source:
+        return []
+    created = []
+    for meal in source:
+        created.append(
+            add_meal(
+                {
+                    "food_name": meal.get("food_name"),
+                    "weight_g": meal.get("weight_g"),
+                    "calories": meal.get("calories"),
+                    "protein": meal.get("protein"),
+                    "carbs": meal.get("carbs"),
+                    "fat": meal.get("fat"),
+                    "ingredient_id": meal.get("ingredient_id"),
+                },
+                date_override=target,
+            )
+        )
+    return created
+
+
+def meals_csv_rows() -> list[dict]:
+    rows = []
+    for meal in get_meals():
+        rows.append(
+            {
+                "date": meal.get("date"),
+                "logged_at": meal.get("logged_at"),
+                "food_name": meal.get("food_name"),
+                "weight_g": meal.get("weight_g"),
+                "calories": meal.get("calories"),
+                "protein": meal.get("protein"),
+                "carbs": meal.get("carbs"),
+                "fat": meal.get("fat"),
+            }
+        )
+    rows.sort(key=lambda r: (r.get("date") or "", r.get("logged_at") or ""))
+    return rows
+
+
+def body_weights_csv_rows() -> list[dict]:
+    rows = []
+    for row in get_body_weights():
+        rows.append(
+            {
+                "date": row.get("date"),
+                "logged_at": row.get("logged_at"),
+                "weight_lbs": row.get("weight_lbs"),
+            }
+        )
+    rows.sort(key=lambda r: (r.get("date") or "", r.get("logged_at") or ""))
+    return rows
 

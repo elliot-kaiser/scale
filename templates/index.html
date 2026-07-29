@@ -3,7 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#1e4a36">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Scale">
   <title>Scale — Smart Kitchen</title>
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -341,7 +348,7 @@
     /* —— Tabs —— */
     .tabs {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       gap: 0.2rem;
       padding: 0.25rem;
       background: rgba(255, 255, 255, 0.45);
@@ -352,13 +359,13 @@
 
     .tab {
       font-family: var(--font);
-      font-size: 0.7rem;
+      font-size: 0.72rem;
       font-weight: 600;
       color: var(--muted);
       background: transparent;
       border: none;
       border-radius: 9px;
-      padding: 0.7rem 0.2rem;
+      padding: 0.7rem 0.15rem;
       cursor: pointer;
       transition: background 0.15s, color 0.15s;
     }
@@ -516,6 +523,12 @@
       background: var(--leaf-soft);
     }
 
+    .cloud-pill.is-warn {
+      color: var(--warn);
+      border-color: rgba(180, 83, 9, 0.35);
+      background: var(--warn-soft);
+    }
+
     .subtabs {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -525,6 +538,14 @@
       border: 1px solid var(--line);
       border-radius: 10px;
       margin-bottom: 0.9rem;
+    }
+
+    .subtabs.cols-4 {
+      grid-template-columns: repeat(4, 1fr);
+    }
+
+    .subtabs.cols-3 {
+      grid-template-columns: repeat(3, 1fr);
     }
 
     .subtab {
@@ -537,6 +558,12 @@
       background: transparent;
       color: var(--muted);
       cursor: pointer;
+    }
+
+    .subtabs.cols-4 .subtab,
+    .subtabs.cols-3 .subtab {
+      font-size: 0.72rem;
+      padding: 0.55rem 0.2rem;
     }
 
     .subtab.is-active {
@@ -755,6 +782,7 @@
 
     .day-detail .meal-row {
       display: flex;
+      flex-wrap: wrap;
       justify-content: space-between;
       gap: 0.75rem;
       padding: 0.55rem 0;
@@ -763,6 +791,11 @@
     }
 
     .day-detail .meal-row:last-child { border-bottom: none; }
+
+    .day-detail .meal-row .inline-edit {
+      flex: 1 1 100%;
+      width: 100%;
+    }
 
     .day-detail .meal-macros {
       font-family: var(--mono);
@@ -1064,6 +1097,71 @@
 
     .meal-actions button.danger { color: var(--danger); }
 
+    .weight-chart-wrap {
+      margin-top: 1rem;
+      padding: 0.85rem 0.9rem 0.7rem;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+    .weight-chart-wrap h4 {
+      margin: 0 0 0.35rem;
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
+    .weight-chart-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.5rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-bottom: 0.45rem;
+      font-family: var(--mono);
+    }
+    .weight-chart {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .weight-chart .grid { stroke: var(--line); stroke-width: 1; }
+    .weight-chart .line {
+      fill: none;
+      stroke: var(--leaf);
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .weight-chart .dot { fill: var(--leaf-deep); }
+    .weight-chart .area {
+      fill: rgba(47, 107, 79, 0.12);
+      stroke: none;
+    }
+
+    .settings-block {
+      margin-top: 1.15rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--line);
+    }
+    .settings-block h4 {
+      margin: 0 0 0.35rem;
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
+    .inline-edit {
+      margin-top: 0.55rem;
+      padding: 0.7rem 0.75rem;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .inline-edit .macro-grid { margin-bottom: 0.55rem; }
+    .day-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin: 0.65rem 0 0.35rem;
+    }
+
     .food-manage {
       margin-top: 1.1rem;
       padding-top: 1rem;
@@ -1073,6 +1171,44 @@
     .food-manage h4 {
       font-size: 0.95rem;
       margin-bottom: 0.45rem;
+    }
+
+    .food-manage-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.55rem;
+      width: 100%;
+      text-align: left;
+      font-family: var(--font);
+      font-size: 0.92rem;
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0.85rem 0.95rem;
+    }
+
+    .food-manage-row .food-meta {
+      flex: 1 1 12rem;
+      min-width: 0;
+    }
+
+    .food-manage-row .food-meta .hint {
+      margin: 0.2rem 0 0;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+    }
+
+    .food-manage-row .meal-actions {
+      margin-top: 0;
+      flex-shrink: 0;
+    }
+
+    .food-manage-row .inline-edit {
+      flex: 1 1 100%;
+      margin-top: 0.15rem;
     }
 
 
@@ -1134,8 +1270,9 @@
     <section class="quick-log" id="quick-log" aria-label="Quick log">
       <div class="quick-log-head">
         <h3>Quick log</h3>
-        <p class="hint" id="quick-log-hint">Tap a food to log what’s on the scale</p>
+        <button type="button" class="btn btn-ghost" style="padding:0.35rem 0.65rem;font-size:0.72rem;" onclick="copyYesterdayMeals()">Same as yesterday</button>
       </div>
+      <p class="hint" id="quick-log-hint">Tap a food to log what’s on the scale</p>
       <div class="quick-chips" id="recent-foods"></div>
       <input type="text" id="quick-search" class="field" placeholder="Search foods to log…" autocomplete="off" oninput="quickSearchFoods(this.value)">
       <div id="quick-results" class="results" style="margin-top:0.45rem;"></div>
@@ -1158,10 +1295,11 @@
     </section>
 
     <nav class="tabs" role="tablist" aria-label="Tools">
-      <button type="button" class="tab is-active" data-tab="scrape" role="tab" aria-selected="true">Recipe</button>
-      <button type="button" class="tab" data-tab="search" role="tab" aria-selected="false">Food log</button>
-      <button type="button" class="tab" data-tab="weight" role="tab" aria-selected="false">Body wt</button>
-      <button type="button" class="tab" data-tab="days" role="tab" aria-selected="false">Days</button>
+      <button type="button" class="tab is-active" data-tab="scrape" role="tab" aria-selected="true">Cook</button>
+      <button type="button" class="tab" data-tab="search" role="tab" aria-selected="false">Foods</button>
+      <button type="button" class="tab" data-tab="weight" role="tab" aria-selected="false">Body</button>
+      <button type="button" class="tab" data-tab="days" role="tab" aria-selected="false">Progress</button>
+      <button type="button" class="tab" data-tab="maint" role="tab" aria-selected="false">Maint</button>
     </nav>
 
     <div id="scrape" class="panel is-active" role="tabpanel">
@@ -1205,66 +1343,80 @@
 
     <div id="search" class="panel" role="tabpanel">
       <div class="section">
-        <h3>Log food</h3>
-        <p class="hint">Search, then tap to log macros from the current scale weight.</p>
-        <input type="text" id="ing-search" class="field" placeholder="Oats, chicken, banana…" oninput="searchIngredients(this.value)" autocomplete="off">
-        <div id="search-results" class="results"></div>
+        <h3>Foods</h3>
+        <p class="hint">Log from the scale, manage the database, or add a new food.</p>
 
-        <div class="add-food">
-          <h4>Add food to database</h4>
-          <p class="hint">Manual entry, barcode lookup (Open Food Facts), or nutrition-label photo.</p>
-
-          <div class="scan-actions">
-            <button type="button" class="btn btn-ghost" onclick="startBarcodeScan()">Scan barcode</button>
-            <button type="button" class="btn btn-ghost" id="label-scan-btn" onclick="document.getElementById('label-file').click()">Label photo</button>
-            <input type="file" id="barcode-file" accept="image/*" capture="environment" hidden>
-            <input type="file" id="label-file" accept="image/*" capture="environment" hidden>
-          </div>
-          <div class="field-row" style="margin-top:0.55rem;">
-            <input type="text" id="barcode-manual" class="field" placeholder="Or type barcode…" inputmode="numeric">
-            <button type="button" class="btn btn-primary" onclick="lookupTypedBarcode()">Lookup</button>
-          </div>
-          <p class="hint" id="scan-status-hint" style="margin-top:0.35rem;"></p>
-          <div id="barcode-reader" class="barcode-reader" style="display:none;"></div>
-          <div id="scan-preview" class="scan-preview" style="display:none;"></div>
-
-          <div class="field-stack">
-            <label>Name
-              <input type="text" id="food-name" class="field" placeholder="e.g. Fairlife chocolate milk" autocomplete="off">
-            </label>
-            <label>These macros are for (g)
-              <input type="number" step="0.1" min="0.1" id="food-serving-g" class="field" value="100" placeholder="100" inputmode="decimal" oninput="updateMacroBasisHint()">
-            </label>
-            <input type="hidden" id="food-barcode" value="">
-          </div>
-          <p class="hint">Use <strong>100</strong> for “per 100g” labels, or the full package / serving weight if the label lists totals for that amount.</p>
-
-          <div class="macro-grid">
-            <label>Calories
-              <input type="number" step="0.1" min="0" id="food-cal" class="field" placeholder="0" inputmode="decimal">
-            </label>
-            <label>Protein (g)
-              <input type="number" step="0.1" min="0" id="food-protein" class="field" placeholder="0" inputmode="decimal">
-            </label>
-            <label>Carbs (g)
-              <input type="number" step="0.1" min="0" id="food-carbs" class="field" placeholder="0" inputmode="decimal">
-            </label>
-            <label>Fat (g)
-              <input type="number" step="0.1" min="0" id="food-fat" class="field" placeholder="0" inputmode="decimal">
-            </label>
-          </div>
-          <p class="macro-basis-hint" id="macro-basis-hint">Macros above apply to 100g.</p>
-
-          <button type="button" class="btn btn-primary btn-block" onclick="saveNewFood()">Save food</button>
+        <div class="subtabs cols-3" role="tablist" aria-label="Foods sections">
+          <button type="button" class="subtab is-active" data-sub="flog">Log</button>
+          <button type="button" class="subtab" data-sub="fmanage">Manage</button>
+          <button type="button" class="subtab" data-sub="fadd">Add</button>
         </div>
 
-        <div class="food-manage">
-          <div class="sheet-toolbar">
-            <h4>Manage foods</h4>
-            <button type="button" class="btn btn-ghost" onclick="loadFoodManager()">Refresh</button>
+        <div id="sub-flog" class="subpanel is-active">
+          <p class="hint">Search and tap to log macros from the current scale weight.</p>
+          <input type="text" id="ing-search" class="field" placeholder="Oats, chicken, banana…" oninput="searchIngredients(this.value)" autocomplete="off">
+          <div id="search-results" class="results"></div>
+        </div>
+
+        <div id="sub-fmanage" class="subpanel">
+          <div class="food-manage" style="margin-top:0;padding-top:0;border-top:none;">
+            <div class="sheet-toolbar">
+              <p class="hint" style="margin:0;">Edit or delete foods in the on-device database.</p>
+              <button type="button" class="btn btn-ghost" onclick="loadFoodManager()">Refresh</button>
+            </div>
+            <input type="text" id="food-manage-search" class="field" placeholder="Filter foods…" oninput="filterFoodManager(this.value)" autocomplete="off">
+            <p class="hint" id="food-manage-count" style="margin:0.35rem 0 0;"></p>
+            <div id="food-manage-list" class="results" style="margin-top:0.55rem;"></div>
           </div>
-          <input type="text" id="food-manage-search" class="field" placeholder="Filter foods…" oninput="filterFoodManager(this.value)" autocomplete="off">
-          <div id="food-manage-list" class="results" style="margin-top:0.55rem;"></div>
+        </div>
+
+        <div id="sub-fadd" class="subpanel">
+          <div class="add-food" style="margin-top:0;padding-top:0;border-top:none;">
+            <p class="hint">Manual entry, barcode lookup (Open Food Facts), or nutrition-label photo.</p>
+
+            <div class="scan-actions">
+              <button type="button" class="btn btn-ghost" onclick="startBarcodeScan()">Scan barcode</button>
+              <button type="button" class="btn btn-ghost" id="label-scan-btn" onclick="document.getElementById('label-file').click()">Label photo</button>
+              <input type="file" id="barcode-file" accept="image/*" capture="environment" hidden>
+              <input type="file" id="label-file" accept="image/*" capture="environment" hidden>
+            </div>
+            <div class="field-row" style="margin-top:0.55rem;">
+              <input type="text" id="barcode-manual" class="field" placeholder="Or type barcode…" inputmode="numeric">
+              <button type="button" class="btn btn-primary" onclick="lookupTypedBarcode()">Lookup</button>
+            </div>
+            <p class="hint" id="scan-status-hint" style="margin-top:0.35rem;"></p>
+            <div id="barcode-reader" class="barcode-reader" style="display:none;"></div>
+            <div id="scan-preview" class="scan-preview" style="display:none;"></div>
+
+            <div class="field-stack">
+              <label>Name
+                <input type="text" id="food-name" class="field" placeholder="e.g. Fairlife chocolate milk" autocomplete="off">
+              </label>
+              <label>These macros are for (g)
+                <input type="number" step="0.1" min="0.1" id="food-serving-g" class="field" value="100" placeholder="100" inputmode="decimal" oninput="updateMacroBasisHint()">
+              </label>
+              <input type="hidden" id="food-barcode" value="">
+            </div>
+            <p class="hint">Use <strong>100</strong> for “per 100g” labels, or the full package / serving weight if the label lists totals for that amount.</p>
+
+            <div class="macro-grid">
+              <label>Calories
+                <input type="number" step="0.1" min="0" id="food-cal" class="field" placeholder="0" inputmode="decimal">
+              </label>
+              <label>Protein (g)
+                <input type="number" step="0.1" min="0" id="food-protein" class="field" placeholder="0" inputmode="decimal">
+              </label>
+              <label>Carbs (g)
+                <input type="number" step="0.1" min="0" id="food-carbs" class="field" placeholder="0" inputmode="decimal">
+              </label>
+              <label>Fat (g)
+                <input type="number" step="0.1" min="0" id="food-fat" class="field" placeholder="0" inputmode="decimal">
+              </label>
+            </div>
+            <p class="macro-basis-hint" id="macro-basis-hint">Macros above apply to 100g.</p>
+
+            <button type="button" class="btn btn-primary btn-block" onclick="saveNewFood()">Save food</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1277,6 +1429,61 @@
           <input type="number" step="0.1" id="body-weight-input" class="field" placeholder="lbs" inputmode="decimal">
           <button type="button" class="btn btn-primary" onclick="logWeight()">Save</button>
         </div>
+
+        <div class="weight-chart-wrap">
+          <h4>Weight over time</h4>
+          <div class="weight-chart-meta">
+            <span id="weight-chart-range">Last 90 days</span>
+            <span id="weight-chart-delta">—</span>
+          </div>
+          <div id="weight-chart" aria-live="polite">
+            <div class="sheet-empty">No weigh-ins yet.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="maint" class="panel" role="tabpanel">
+      <div class="section">
+        <h3>Maintenance</h3>
+        <p class="hint">Calibration, backups, and cloud sync. Day-to-day logging stays on the other tabs.</p>
+
+        <div class="settings-block" style="margin-top:0;padding-top:0;border-top:none;">
+          <h4>Calibrate scale</h4>
+          <p class="hint">Tare empty, place a known weight, then calibrate. Saved across restarts.</p>
+          <div class="field-row">
+            <input type="number" id="calibrate-known-g" class="field" value="500" step="1" min="1" inputmode="decimal" placeholder="Known g">
+            <button type="button" class="btn btn-primary" onclick="calibrateScale()">Calibrate</button>
+          </div>
+          <p class="hint" id="calibrate-hint" style="margin-bottom:0;"></p>
+        </div>
+
+        <div class="settings-block">
+          <h4>Cloud sync</h4>
+          <p class="hint" id="cloud-status-summary">Checking Supabase…</p>
+          <p class="hint" id="cloud-status-detail" style="margin-top:-0.35rem;"></p>
+          <div class="field-row" style="flex-wrap:wrap;">
+            <button type="button" class="btn btn-primary" onclick="testCloudConnection()">Test connection</button>
+            <button type="button" class="btn btn-ghost" onclick="syncFoodsToCloud()">Push foods</button>
+          </div>
+          <p class="hint" id="cloud-sync-hint" style="margin-bottom:0;"></p>
+        </div>
+
+        <div class="settings-block">
+          <h4>Backup &amp; export</h4>
+          <p class="hint">Download a full JSON backup, CSV exports, or restore from a backup file.</p>
+          <div class="field-row" style="flex-wrap:wrap;">
+            <button type="button" class="btn btn-primary" onclick="downloadBackup()">Download backup</button>
+            <button type="button" class="btn btn-ghost" onclick="downloadCsv('meals')">Meals CSV</button>
+            <button type="button" class="btn btn-ghost" onclick="downloadCsv('weights')">Weights CSV</button>
+          </div>
+          <label class="field-stack" style="margin-top:0.35rem;">
+            <span style="font-size:0.72rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--muted);">Restore backup</span>
+            <input type="file" id="restore-file" class="field" accept="application/json,.json">
+          </label>
+          <button type="button" class="btn btn-ghost btn-block" onclick="restoreBackup()">Restore (replaces all local data)</button>
+          <p class="hint" id="backup-hint" style="margin-top:0.45rem;margin-bottom:0;"></p>
+        </div>
       </div>
     </div>
 
@@ -1284,80 +1491,102 @@
       <div class="section">
         <div class="sheet-toolbar">
           <div>
-            <h3>Daily log</h3>
-            <p class="hint" style="margin-bottom:0;">Macros + body weight by day. Tap a row for details.</p>
+            <h3>Progress</h3>
+            <p class="hint" style="margin-bottom:0;">Today, history, and targets / weight goal.</p>
           </div>
           <button type="button" class="btn btn-ghost" onclick="loadDailySummary()">Refresh</button>
         </div>
 
-        <div class="plan-card" id="weekly-review-card">
-          <h4>This week</h4>
-          <p class="hint" id="weekly-summary">Loading…</p>
-          <div class="plan-stat-grid" id="weekly-stats"></div>
+        <div class="subtabs cols-3" role="tablist" aria-label="Progress sections">
+          <button type="button" class="subtab is-active" data-daysub="overview">Today</button>
+          <button type="button" class="subtab" data-daysub="history">History</button>
+          <button type="button" class="subtab" data-daysub="targets">Targets</button>
         </div>
 
-        <div class="targets-card" id="targets-card">
-          <h4>Today vs targets</h4>
-          <div class="targets-grid" id="targets-remaining">
-            <div class="target-pill"><span class="lbl">kcal left</span><span class="val" id="rem-cal">—</span></div>
-            <div class="target-pill"><span class="lbl">P left</span><span class="val" id="rem-p">—</span></div>
-            <div class="target-pill"><span class="lbl">C left</span><span class="val" id="rem-c">—</span></div>
-            <div class="target-pill"><span class="lbl">F left</span><span class="val" id="rem-f">—</span></div>
+        <div id="daysub-overview" class="subpanel is-active">
+          <div class="targets-card" id="targets-card">
+            <h4>Remaining today</h4>
+            <div class="targets-grid" id="targets-remaining">
+              <div class="target-pill"><span class="lbl">kcal left</span><span class="val" id="rem-cal">—</span></div>
+              <div class="target-pill"><span class="lbl">P left</span><span class="val" id="rem-p">—</span></div>
+              <div class="target-pill"><span class="lbl">C left</span><span class="val" id="rem-c">—</span></div>
+              <div class="target-pill"><span class="lbl">F left</span><span class="val" id="rem-f">—</span></div>
+            </div>
+            <p class="hint" id="targets-consumed" style="margin-bottom:0;"></p>
           </div>
-          <p class="hint" id="targets-consumed" style="margin-bottom:0.65rem;"></p>
-          <div class="field-stack" style="margin-bottom:0.55rem;">
-            <label>Daily calories
-              <input type="number" id="tgt-cal" class="field" step="1" min="0" inputmode="numeric" oninput="recalcTargetMacros()">
-            </label>
+
+          <div class="plan-card" id="weekly-review-card">
+            <h4>This week</h4>
+            <p class="hint" id="weekly-summary">Loading…</p>
+            <div class="plan-stat-grid" id="weekly-stats"></div>
           </div>
-          <div class="macro-grid">
-            <label>Protein %
-              <input type="number" id="tgt-pct-p" class="field" step="0.1" min="0" max="100" inputmode="decimal" oninput="recalcTargetMacros()">
-            </label>
-            <label>Carbs %
-              <input type="number" id="tgt-pct-c" class="field" step="0.1" min="0" max="100" inputmode="decimal" oninput="recalcTargetMacros()">
-            </label>
-            <label>Fat %
-              <input type="number" id="tgt-pct-f" class="field" step="0.1" min="0" max="100" inputmode="decimal" oninput="recalcTargetMacros()">
-            </label>
-          </div>
-          <p class="hint" id="tgt-pct-sum" style="margin-top:-0.25rem;">Macro % should add to 100.</p>
-          <div class="macro-grid">
-            <label>Protein (g)
-              <input type="number" id="tgt-p" class="field" step="0.1" readonly tabindex="-1">
-            </label>
-            <label>Carbs (g)
-              <input type="number" id="tgt-c" class="field" step="0.1" readonly tabindex="-1">
-            </label>
-            <label>Fat (g)
-              <input type="number" id="tgt-f" class="field" step="0.1" readonly tabindex="-1">
-            </label>
-          </div>
-          <button type="button" class="btn btn-ghost btn-block" onclick="saveTargets()">Save targets</button>
         </div>
 
-        <div class="plan-card" id="weight-plan-card">
-          <h4>Weight trend &amp; goal</h4>
-          <p class="hint">Uses the last month of weigh-ins + calorie logs to estimate maintenance, then a daily calorie target for your goal.</p>
-          <div id="plan-trend">
-            <div class="sheet-empty">Loading trend…</div>
+        <div id="daysub-history" class="subpanel">
+          <p class="hint">Tap a day for meals, edit, or mark do-not-count.</p>
+          <div id="daily-sheet" class="sheet-scroll">
+            <div class="sheet-empty">No logged days yet.</div>
           </div>
-          <div class="macro-grid" style="margin-top:0.75rem;">
-            <label>Goal weight (lbs)
-              <input type="number" id="plan-goal-lbs" class="field" step="0.1" min="50" inputmode="decimal">
-            </label>
-            <label>Achieve by
-              <input type="date" id="plan-goal-date" class="field">
-            </label>
-          </div>
-          <button type="button" class="btn btn-ghost btn-block" onclick="saveWeightPlan()">Calculate plan</button>
-          <div id="plan-goal-result" style="display:none;"></div>
+          <div id="day-detail" class="day-detail" aria-live="polite"></div>
         </div>
 
-        <div id="daily-sheet" class="sheet-scroll">
-          <div class="sheet-empty">No logged days yet.</div>
+        <div id="daysub-targets" class="subpanel">
+          <div class="plan-card" id="weight-plan-card">
+            <h4>Weight goal</h4>
+            <p class="hint">From weigh-ins + calorie history → maintenance and a daily calorie target.</p>
+            <div id="plan-trend">
+              <div class="sheet-empty">Loading trend…</div>
+            </div>
+            <div class="macro-grid" style="margin-top:0.75rem;">
+              <label>Goal weight (lbs)
+                <input type="number" id="plan-goal-lbs" class="field" step="0.1" min="50" inputmode="decimal">
+              </label>
+              <label>Achieve by
+                <input type="date" id="plan-goal-date" class="field">
+              </label>
+            </div>
+            <button type="button" class="btn btn-ghost btn-block" onclick="saveWeightPlan()">Update goal plan</button>
+            <div id="plan-goal-result" style="display:none;"></div>
+          </div>
+
+          <div class="targets-card" style="margin-bottom:0;">
+            <h4>Daily targets</h4>
+            <p class="hint">Calories + macro split. Use Auto to fill from your weight goal plan.</p>
+            <div class="field-stack" style="margin-bottom:0.55rem;">
+              <label>Daily calories
+                <input type="number" id="tgt-cal" class="field" step="1" min="0" inputmode="numeric" oninput="recalcTargetMacros()">
+              </label>
+            </div>
+            <div class="macro-grid">
+              <label>Protein %
+                <input type="number" id="tgt-pct-p" class="field" step="0.1" min="0" max="100" inputmode="decimal" oninput="recalcTargetMacros()">
+              </label>
+              <label>Carbs %
+                <input type="number" id="tgt-pct-c" class="field" step="0.1" min="0" max="100" inputmode="decimal" oninput="recalcTargetMacros()">
+              </label>
+              <label>Fat %
+                <input type="number" id="tgt-pct-f" class="field" step="0.1" min="0" max="100" inputmode="decimal" oninput="recalcTargetMacros()">
+              </label>
+            </div>
+            <p class="hint" id="tgt-pct-sum" style="margin-top:-0.25rem;">Macro % should add to 100.</p>
+            <div class="macro-grid">
+              <label>Protein (g)
+                <input type="number" id="tgt-p" class="field" step="0.1" readonly tabindex="-1">
+              </label>
+              <label>Carbs (g)
+                <input type="number" id="tgt-c" class="field" step="0.1" readonly tabindex="-1">
+              </label>
+              <label>Fat (g)
+                <input type="number" id="tgt-f" class="field" step="0.1" readonly tabindex="-1">
+              </label>
+            </div>
+            <div class="field-row" style="margin-top:0.35rem;">
+              <button type="button" class="btn btn-ghost" onclick="autoFillTargetsFromGoal()">Auto from goal</button>
+              <button type="button" class="btn btn-primary" onclick="saveTargets()">Save targets</button>
+            </div>
+            <p class="hint" id="auto-targets-hint" style="margin-top:0.45rem;margin-bottom:0;"></p>
+          </div>
         </div>
-        <div id="day-detail" class="day-detail" aria-live="polite"></div>
       </div>
     </div>
   </div>
@@ -1553,23 +1782,104 @@
       }
     });
 
-    async function refreshCloudStatus() {
+    async function refreshCloudStatus(opts) {
+      const force = opts && opts.refresh;
       try {
-        const res = await fetch('/api/cloud/status');
+        const res = await fetch('/api/cloud/status' + (force ? '?refresh=1' : ''));
         const data = await res.json();
+        applyCloudStatus(data);
+        return data;
+      } catch (e) {
         const pill = document.getElementById('cloud-pill');
-        if (data.configured) {
-          pill.textContent = 'Supabase';
-          pill.classList.add('is-on');
-          pill.title = data.url || 'Synced to Supabase';
-        } else {
-          pill.textContent = 'Local only';
-          pill.classList.remove('is-on');
-          pill.title = data.error || 'Configure .env for Supabase';
+        if (pill) {
+          pill.textContent = 'Cloud ?';
+          pill.classList.remove('is-on', 'is-warn');
         }
-      } catch (e) {}
+      }
     }
-    refreshCloudStatus();
+
+    function applyCloudStatus(data) {
+      const pill = document.getElementById('cloud-pill');
+      const summary = document.getElementById('cloud-status-summary');
+      const detail = document.getElementById('cloud-status-detail');
+      if (!data) return;
+
+      if (pill) {
+        pill.classList.remove('is-on', 'is-warn');
+        if (!data.configured) {
+          pill.textContent = 'Local only';
+          pill.title = data.error || 'Configure .env for Supabase';
+        } else if (data.ok && data.writable) {
+          pill.textContent = 'Cloud OK';
+          pill.classList.add('is-on');
+          pill.title = data.url || 'Supabase read/write OK';
+        } else if (data.ok && data.writable === false) {
+          pill.textContent = 'Cloud RO';
+          pill.classList.add('is-warn');
+          pill.title = data.error || 'Cloud readable but writes blocked';
+        } else {
+          pill.textContent = 'Cloud down';
+          pill.classList.add('is-warn');
+          pill.title = data.error || data.hint || 'Using local data';
+        }
+      }
+
+      if (summary) {
+        if (!data.configured) {
+          summary.textContent = 'Supabase not configured — everything stays on this Pi.';
+        } else if (data.ok && data.writable) {
+          summary.textContent = 'Supabase connected (read + write). Local data still stays authoritative on the Pi.';
+        } else if (data.ok) {
+          summary.textContent = 'Supabase is readable, but writes are blocked.';
+        } else {
+          summary.textContent = 'Supabase configured but blocked — app is using local data.';
+        }
+      }
+      if (detail) {
+        detail.textContent = data.hint || data.error || (data.url ? data.url : '');
+      }
+    }
+
+    async function testCloudConnection() {
+      const hint = document.getElementById('cloud-sync-hint');
+      if (hint) hint.textContent = 'Testing…';
+      try {
+        const res = await fetch('/api/cloud/test', { method: 'POST' });
+        const data = await res.json();
+        applyCloudStatus(data);
+        if (hint) {
+          hint.textContent = data.ok && data.writable
+            ? 'Connection OK — reads and writes work.'
+            : (data.hint || data.error || 'Connection failed');
+        }
+        showToast(data.ok && data.writable ? 'Cloud OK' : 'Cloud blocked');
+      } catch (e) {
+        if (hint) hint.textContent = 'Could not reach cloud test endpoint';
+        showToast('Cloud test failed');
+      }
+    }
+
+    async function syncFoodsToCloud() {
+      const hint = document.getElementById('cloud-sync-hint');
+      if (hint) hint.textContent = 'Pushing foods…';
+      try {
+        const res = await fetch('/api/cloud/sync_foods', { method: 'POST' });
+        const data = await res.json();
+        await refreshCloudStatus({ refresh: true });
+        if (!res.ok) {
+          if (hint) hint.textContent = data.hint || data.message || 'Sync failed';
+          return showToast(data.message || 'Sync failed');
+        }
+        if (hint) hint.textContent = 'Pushed ' + (data.synced || 0) + ' foods'
+          + (data.failed ? (' · ' + data.failed + ' failed') : '');
+        showToast('Foods pushed to cloud');
+      } catch (e) {
+        if (hint) hint.textContent = 'Could not sync foods';
+        showToast('Sync failed');
+      }
+    }
+
+    refreshCloudStatus({ refresh: true });
 
     async function saveNewFood() {
       const name = document.getElementById('food-name').value.trim();
@@ -1617,6 +1927,16 @@
         document.getElementById('food-barcode').value = '';
         document.getElementById('food-serving-g').value = '100';
         updateMacroBasisHint();
+        // Jump to Log so the new food is ready to weigh.
+        const foodsSection = document.querySelector('#search .section');
+        if (foodsSection) {
+          foodsSection.querySelectorAll('.subtab[data-sub]').forEach(t => t.classList.remove('is-active'));
+          foodsSection.querySelectorAll('.subpanel[id^="sub-"]').forEach(p => p.classList.remove('is-active'));
+          const logTab = foodsSection.querySelector('.subtab[data-sub="flog"]');
+          const logPanel = document.getElementById('sub-flog');
+          if (logTab) logTab.classList.add('is-active');
+          if (logPanel) logPanel.classList.add('is-active');
+        }
         document.getElementById('ing-search').value = data.food.name;
         searchIngredients(data.food.name);
       } catch (e) {
@@ -1624,13 +1944,26 @@
       }
     }
 
-    document.querySelectorAll('.subtab').forEach(tab => {
+    document.querySelectorAll('.subtab[data-sub]').forEach(tab => {
       tab.addEventListener('click', () => {
-        document.querySelectorAll('.subtab').forEach(t => t.classList.remove('is-active'));
-        document.querySelectorAll('.subpanel').forEach(p => p.classList.remove('is-active'));
+        const parent = tab.closest('.section') || document;
+        parent.querySelectorAll('.subtab[data-sub]').forEach(t => t.classList.remove('is-active'));
+        parent.querySelectorAll('.subpanel[id^="sub-"]').forEach(p => p.classList.remove('is-active'));
         tab.classList.add('is-active');
-        document.getElementById('sub-' + tab.dataset.sub).classList.add('is-active');
+        const panel = document.getElementById('sub-' + tab.dataset.sub);
+        if (panel) panel.classList.add('is-active');
         if (tab.dataset.sub === 'saved') loadSavedRecipes();
+        if (tab.dataset.sub === 'fmanage') loadFoodManager();
+      });
+    });
+
+    document.querySelectorAll('.subtab[data-daysub]').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.subtab[data-daysub]').forEach(t => t.classList.remove('is-active'));
+        document.querySelectorAll('.subpanel[id^="daysub-"]').forEach(p => p.classList.remove('is-active'));
+        tab.classList.add('is-active');
+        const panel = document.getElementById('daysub-' + tab.dataset.daysub);
+        if (panel) panel.classList.add('is-active');
       });
     });
 
@@ -1645,7 +1978,15 @@
         tab.setAttribute('aria-selected', 'true');
         document.getElementById(tab.dataset.tab).classList.add('is-active');
         if (tab.dataset.tab === 'days') loadDailySummary();
-        if (tab.dataset.tab === 'search') loadFoodManager();
+        if (tab.dataset.tab === 'search') {
+          const manageTab = document.querySelector('#search .subtab[data-sub="fmanage"]');
+          if (manageTab && manageTab.classList.contains('is-active')) loadFoodManager();
+        }
+        if (tab.dataset.tab === 'weight') loadWeightChart();
+        if (tab.dataset.tab === 'maint') {
+          loadCalibrationHint();
+          refreshCloudStatus({ refresh: true });
+        }
       });
     });
 
@@ -2250,8 +2591,200 @@
       });
       showToast('Body weight saved');
       document.getElementById('body-weight-input').value = '';
+      loadWeightChart();
       if (document.getElementById('days').classList.contains('is-active')) {
         loadDailySummary();
+      }
+    }
+
+    function renderWeightChart(weights) {
+      const box = document.getElementById('weight-chart');
+      const deltaEl = document.getElementById('weight-chart-delta');
+      const rangeEl = document.getElementById('weight-chart-range');
+      if (!weights || !weights.length) {
+        box.innerHTML = '<div class="sheet-empty">No weigh-ins yet.</div>';
+        deltaEl.textContent = '—';
+        rangeEl.textContent = 'Last 90 days';
+        return;
+      }
+
+      // One point per date (latest that day)
+      const byDate = {};
+      weights.forEach(w => {
+        if (w.date == null || w.weight_lbs == null) return;
+        byDate[w.date] = Number(w.weight_lbs);
+      });
+      const points = Object.keys(byDate).sort().map(d => ({ date: d, lbs: byDate[d] }));
+      if (points.length < 1) {
+        box.innerHTML = '<div class="sheet-empty">No weigh-ins yet.</div>';
+        return;
+      }
+
+      const first = points[0].lbs;
+      const last = points[points.length - 1].lbs;
+      const delta = round1(last - first);
+      deltaEl.textContent = (delta > 0 ? '+' : '') + delta + ' lbs · now ' + last;
+      rangeEl.textContent = points.length + ' weigh-ins · ' + formatDateLabel(points[0].date)
+        + ' → ' + formatDateLabel(points[points.length - 1].date);
+
+      const W = 320, H = 140, padL = 36, padR = 10, padT = 12, padB = 28;
+      const vals = points.map(p => p.lbs);
+      let minV = Math.min(...vals);
+      let maxV = Math.max(...vals);
+      if (maxV - minV < 1) {
+        minV -= 0.5;
+        maxV += 0.5;
+      }
+      const span = maxV - minV || 1;
+      const innerW = W - padL - padR;
+      const innerH = H - padT - padB;
+
+      const xy = points.map((p, i) => {
+        const x = padL + (points.length === 1 ? innerW / 2 : (i / (points.length - 1)) * innerW);
+        const y = padT + (1 - (p.lbs - minV) / span) * innerH;
+        return { x, y, ...p };
+      });
+
+      const line = xy.map((p, i) => (i ? 'L' : 'M') + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ');
+      const area = line + ' L' + xy[xy.length - 1].x.toFixed(1) + ' ' + (padT + innerH)
+        + ' L' + xy[0].x.toFixed(1) + ' ' + (padT + innerH) + ' Z';
+      const yTicks = [minV, (minV + maxV) / 2, maxV];
+      let svg = '<svg class="weight-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Body weight chart">';
+      yTicks.forEach(v => {
+        const y = padT + (1 - (v - minV) / span) * innerH;
+        svg += '<line class="grid" x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '"/>';
+        svg += '<text x="2" y="' + (y + 3) + '" font-size="9" fill="#6b7a72" font-family="IBM Plex Mono, monospace">'
+          + round1(v) + '</text>';
+      });
+      svg += '<path class="area" d="' + area + '"/>';
+      svg += '<path class="line" d="' + line + '"/>';
+      xy.forEach(p => {
+        svg += '<circle class="dot" cx="' + p.x + '" cy="' + p.y + '" r="3"><title>'
+          + p.date + ': ' + p.lbs + ' lbs</title></circle>';
+      });
+      const labelIdx = [0, Math.floor((xy.length - 1) / 2), xy.length - 1]
+        .filter((v, i, a) => a.indexOf(v) === i);
+      labelIdx.forEach(i => {
+        const p = xy[i];
+        svg += '<text x="' + p.x + '" y="' + (H - 8) + '" text-anchor="middle" font-size="9" fill="#6b7a72">'
+          + formatDateLabel(p.date).replace(/,.*/, '') + '</text>';
+      });
+      svg += '</svg>';
+      box.innerHTML = svg;
+    }
+
+    async function loadWeightChart() {
+      try {
+        const res = await fetch('/api/body_weights?days=90');
+        const data = await res.json();
+        renderWeightChart(data.weights || []);
+      } catch (e) {
+        document.getElementById('weight-chart').innerHTML =
+          '<div class="sheet-empty">Could not load weight chart.</div>';
+      }
+    }
+
+    async function loadCalibrationHint() {
+      const hint = document.getElementById('calibrate-hint');
+      if (!hint) return;
+      try {
+        const res = await fetch('/api/calibration');
+        const data = await res.json();
+        hint.textContent = 'Current reference unit: ' + (data.reference_unit || '—');
+      } catch (e) {
+        hint.textContent = '';
+      }
+    }
+
+    async function calibrateScale() {
+      const known = parseFloat(document.getElementById('calibrate-known-g').value);
+      if (!(known > 0)) return showToast('Enter known weight in grams');
+      try {
+        const res = await fetch('/api/calibrate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ known_weight_g: known })
+        });
+        const data = await res.json();
+        if (!res.ok) return showToast(data.message || 'Calibration failed');
+        document.getElementById('calibrate-hint').textContent =
+          'Saved reference unit ' + data.reference_unit + ' (was ' + data.previous_reference_unit + ')';
+        showToast('Scale calibrated');
+      } catch (e) {
+        showToast('Could not calibrate');
+      }
+    }
+
+    function downloadBackup() {
+      window.location.href = '/api/backup';
+      showToast('Downloading backup…');
+    }
+
+    function downloadCsv(kind) {
+      window.location.href = '/api/export.csv?kind=' + encodeURIComponent(kind || 'meals');
+      showToast('Downloading CSV…');
+    }
+
+    async function restoreBackup() {
+      const input = document.getElementById('restore-file');
+      const hint = document.getElementById('backup-hint');
+      const file = input.files && input.files[0];
+      if (!file) return showToast('Choose a backup JSON file first');
+      if (!confirm('Replace ALL local data with this backup? This cannot be undone.')) return;
+      try {
+        const text = await file.text();
+        const payload = JSON.parse(text);
+        const res = await fetch('/api/restore?confirm=true', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) return showToast(data.message || 'Restore failed');
+        hint.textContent = 'Restored: ' + data.meals + ' meals · ' + data.body_weights
+          + ' weigh-ins · ' + data.foods + ' foods · ' + data.recipes + ' recipes';
+        showToast('Backup restored');
+        loadWeightChart();
+        loadDailySummary();
+        loadFoodManager();
+      } catch (e) {
+        showToast('Invalid backup file');
+      }
+    }
+
+    async function copyYesterdayMeals() {
+      if (!confirm('Copy yesterday’s meals onto today?')) return;
+      try {
+        const res = await fetch('/api/meals/copy_day', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (!res.ok) return showToast(data.message || 'Could not copy');
+        if (!data.copied) return showToast('No meals logged yesterday');
+        showToast('Copied ' + data.copied + ' meal' + (data.copied === 1 ? '' : 's') + ' from yesterday');
+        if (document.getElementById('days').classList.contains('is-active')) loadDailySummary();
+      } catch (e) {
+        showToast('Could not copy yesterday');
+      }
+    }
+
+    async function copyDayMealsToToday(fromDate) {
+      if (!confirm('Copy all meals from ' + formatDateLabel(fromDate) + ' to today?')) return;
+      try {
+        const res = await fetch('/api/meals/copy_day', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from_date: fromDate })
+        });
+        const data = await res.json();
+        if (!res.ok) return showToast(data.message || 'Could not copy');
+        if (!data.copied) return showToast('No meals to copy');
+        showToast('Copied ' + data.copied + ' meal' + (data.copied === 1 ? '' : 's') + ' to today');
+        loadDailySummary();
+      } catch (e) {
+        showToast('Could not copy day');
       }
     }
 
@@ -2361,7 +2894,8 @@
       updatePctSumHint();
     }
 
-    async function saveTargets() {
+    async function saveTargets(opts) {
+      const silent = opts && opts.silent;
       recalcTargetMacros();
       const payload = {
         target_calories: parseFloat(document.getElementById('tgt-cal').value),
@@ -2378,9 +2912,13 @@
         body: JSON.stringify(payload)
       });
       const data = await res.json();
-      if (!res.ok) return showToast(data.message || 'Could not save targets');
-      showToast('Targets saved');
+      if (!res.ok) {
+        if (!silent) showToast(data.message || 'Could not save targets');
+        return false;
+      }
+      if (!silent) showToast('Targets saved');
       loadDailySummary();
+      return true;
     }
 
     function signedLbs(n) {
@@ -2479,16 +3017,29 @@
         + g.weeks_left + ' weeks · expect '
         + signedLbs(g.expected_lbs_per_week) + ' lbs/week'
         + '</p>'
-        + '<button type="button" class="btn btn-primary btn-block" style="margin-top:0.75rem;" onclick="applyPlanCalories('
-        + g.goal_calories + ')">Use as calorie target</button>'
+        + '<p class="hint" style="margin:0.55rem 0 0;">Tap <strong>Auto from goal</strong> below to fill calories + macros.</p>'
         + '</div>';
+    }
+
+    let lastWeightPlan = null;
+
+    function suggestedMacroPercents(direction) {
+      if (direction === 'lose') return { p: 40, c: 30, f: 30 };
+      if (direction === 'gain') return { p: 25, c: 45, f: 30 };
+      return { p: 30, c: 40, f: 30 };
+    }
+
+    async function fetchWeightPlan() {
+      const res = await fetch('/api/weight_plan?days=30');
+      const plan = await res.json();
+      lastWeightPlan = plan;
+      renderWeightPlan(plan);
+      return plan;
     }
 
     async function loadWeightPlan() {
       try {
-        const res = await fetch('/api/weight_plan?days=30');
-        const plan = await res.json();
-        renderWeightPlan(plan);
+        await fetchWeightPlan();
       } catch (e) {
         document.getElementById('plan-trend').innerHTML =
           '<p class="hint" style="margin:0;">Could not load weight plan.</p>';
@@ -2508,10 +3059,49 @@
         });
         const plan = await res.json();
         if (!res.ok) return showToast(plan.message || 'Could not save goal');
+        lastWeightPlan = plan;
         renderWeightPlan(plan);
         showToast('Weight plan updated');
+        return plan;
       } catch (e) {
         showToast('Could not save weight plan');
+        return null;
+      }
+    }
+
+    async function autoFillTargetsFromGoal() {
+      const hint = document.getElementById('auto-targets-hint');
+      hint.textContent = '';
+      try {
+        let plan = lastWeightPlan;
+        const lbs = parseFloat(document.getElementById('plan-goal-lbs').value);
+        const goalDate = document.getElementById('plan-goal-date').value;
+        if (lbs > 0 && goalDate) {
+          plan = await saveWeightPlan();
+          if (!plan) return;
+        } else if (!plan || !plan.goal || plan.goal.error) {
+          plan = await fetchWeightPlan();
+        }
+
+        const g = plan && plan.goal;
+        if (!g || g.error) {
+          const msg = (g && g.error) || 'Set a goal weight and date first, then Update goal plan.';
+          hint.textContent = msg;
+          return showToast(msg);
+        }
+
+        const macros = suggestedMacroPercents(g.direction);
+        document.getElementById('tgt-cal').value = g.goal_calories;
+        document.getElementById('tgt-pct-p').value = macros.p;
+        document.getElementById('tgt-pct-c').value = macros.c;
+        document.getElementById('tgt-pct-f').value = macros.f;
+        recalcTargetMacros();
+        await saveTargets({ silent: true });
+        hint.textContent = 'Auto: ' + g.goal_calories + ' kcal · P' + macros.p
+          + '% / C' + macros.c + '% / F' + macros.f + '% (' + g.direction + ')';
+        showToast('Targets filled from goal');
+      } catch (e) {
+        showToast('Could not auto-fill from goal');
       }
     }
 
@@ -2611,6 +3201,7 @@
         const meals = data.meals || [];
         const totals = data.totals || {};
         const excluded = !!data.plan_excluded;
+        const todayIso = new Date().toLocaleDateString('en-CA');
 
         let html = '<h4>' + formatDateLabel(dateStr) + '</h4>';
         html += '<label class="exclude-toggle">'
@@ -2619,6 +3210,12 @@
           + '<span>Skip this day’s calories if tracking was incomplete. Weigh-ins still count for the trend.</span></span>'
           + '</label>';
 
+        html += '<div class="day-actions">';
+        if (meals.length && dateStr !== todayIso) {
+          html += '<button type="button" class="btn btn-ghost" id="copy-day-btn">Copy meals to today</button>';
+        }
+        html += '</div>';
+
         if (!meals.length) {
           html += '<p class="hint">No food logged this day.</p>';
         } else {
@@ -2626,10 +3223,14 @@
             html += '<div class="meal-row" data-meal-id="' + escapeHtml(m.id) + '">'
               + '<div><strong>' + escapeHtml(m.food_name) + '</strong> · ' + m.weight_g + 'g'
               + '<div class="meal-actions">'
-              + '<button type="button" data-act="edit">Edit</button>'
+              + '<button type="button" data-act="edit">Edit log</button>'
+              + (m.ingredient_id
+                ? '<button type="button" data-act="edit-food">Edit food</button>'
+                : '')
               + '<button type="button" class="danger" data-act="delete">Delete</button>'
               + '</div></div>'
               + '<span class="meal-macros">' + m.calories + ' kcal · P' + m.protein + ' C' + m.carbs + ' F' + m.fat + '</span>'
+              + '<div class="inline-edit" data-edit-panel hidden></div>'
               + '</div>';
           });
           html += '<div class="meal-row" style="margin-top:0.35rem;border-top:1px solid var(--line);padding-top:0.7rem;">'
@@ -2652,6 +3253,11 @@
           });
         }
 
+        const copyBtn = document.getElementById('copy-day-btn');
+        if (copyBtn) {
+          copyBtn.addEventListener('click', () => copyDayMealsToToday(dateStr));
+        }
+
         detail.querySelectorAll('[data-act]').forEach(btn => {
           btn.addEventListener('click', async (ev) => {
             ev.stopPropagation();
@@ -2659,37 +3265,124 @@
             const mealId = row && row.dataset.mealId;
             const meal = meals.find(m => String(m.id) === String(mealId));
             if (!meal) return;
+            const panel = row.querySelector('[data-edit-panel]');
+
             if (btn.dataset.act === 'delete') {
               if (!confirm('Delete this meal log?')) return;
               await fetch('/api/meals/' + encodeURIComponent(mealId), { method: 'DELETE' });
               showToast('Meal deleted');
               openDayDetail(dateStr, rowEl);
               loadDailySummary();
-            } else if (btn.dataset.act === 'edit') {
-              const calories = prompt('Calories', meal.calories);
-              if (calories == null) return;
-              const protein = prompt('Protein (g)', meal.protein);
-              if (protein == null) return;
-              const carbs = prompt('Carbs (g)', meal.carbs);
-              if (carbs == null) return;
-              const fat = prompt('Fat (g)', meal.fat);
-              if (fat == null) return;
-              const weight_g = prompt('Weight (g)', meal.weight_g);
-              if (weight_g == null) return;
-              await fetch('/api/meals/' + encodeURIComponent(mealId), {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  calories: parseFloat(calories),
-                  protein: parseFloat(protein),
-                  carbs: parseFloat(carbs),
-                  fat: parseFloat(fat),
-                  weight_g: parseFloat(weight_g),
-                })
-              });
-              showToast('Meal updated');
-              openDayDetail(dateStr, rowEl);
-              loadDailySummary();
+              return;
+            }
+
+            if (btn.dataset.act === 'edit') {
+              detail.querySelectorAll('[data-edit-panel]').forEach(p => { p.hidden = true; p.innerHTML = ''; });
+              panel.hidden = false;
+              panel.innerHTML =
+                '<p class="hint" style="margin:0 0 0.45rem;">Edit this log entry only.</p>'
+                + '<div class="macro-grid">'
+                + '<label>kcal<input type="number" class="field" data-f="calories" value="' + meal.calories + '" step="0.1"></label>'
+                + '<label>Protein<input type="number" class="field" data-f="protein" value="' + meal.protein + '" step="0.1"></label>'
+                + '<label>Carbs<input type="number" class="field" data-f="carbs" value="' + meal.carbs + '" step="0.1"></label>'
+                + '<label>Fat<input type="number" class="field" data-f="fat" value="' + meal.fat + '" step="0.1"></label>'
+                + '<label>Weight g<input type="number" class="field" data-f="weight_g" value="' + meal.weight_g + '" step="0.1"></label>'
+                + '</div>'
+                + '<div class="field-row" style="margin:0;">'
+                + '<button type="button" class="btn btn-primary" data-save="meal">Save log</button>'
+                + '<button type="button" class="btn btn-ghost" data-cancel>Cancel</button>'
+                + '</div>';
+              panel.querySelector('[data-cancel]').onclick = () => { panel.hidden = true; panel.innerHTML = ''; };
+              panel.querySelector('[data-save="meal"]').onclick = async () => {
+                const payload = {};
+                panel.querySelectorAll('[data-f]').forEach(inp => {
+                  payload[inp.dataset.f] = parseFloat(inp.value);
+                });
+                await fetch('/api/meals/' + encodeURIComponent(mealId), {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(payload)
+                });
+                showToast('Meal updated');
+                openDayDetail(dateStr, rowEl);
+                loadDailySummary();
+              };
+              return;
+            }
+
+            if (btn.dataset.act === 'edit-food') {
+              if (!meal.ingredient_id) return showToast('No linked food in database');
+              let food = null;
+              try {
+                const catalog = await ensureFoodCatalog();
+                food = catalog.find(f => String(f.id) === String(meal.ingredient_id));
+              } catch (e) {}
+              if (!food) {
+                try {
+                  const fres = await fetch('/api/ingredients');
+                  const all = await fres.json();
+                  foodCatalogCache = all;
+                  food = all.find(f => String(f.id) === String(meal.ingredient_id));
+                } catch (e) {}
+              }
+              if (!food) return showToast('Food not found in database');
+
+              detail.querySelectorAll('[data-edit-panel]').forEach(p => { p.hidden = true; p.innerHTML = ''; });
+              panel.hidden = false;
+              panel.innerHTML =
+                '<p class="hint" style="margin:0 0 0.45rem;">Update <strong>'
+                + escapeHtml(food.name) + '</strong> in the food database (per 100g). Future logs use these macros.</p>'
+                + '<div class="macro-grid">'
+                + '<label>kcal/100g<input type="number" class="field" data-f="calories_per_100g" value="'
+                + (food.calories_per_100g || 0) + '" step="0.1"></label>'
+                + '<label>P/100g<input type="number" class="field" data-f="protein_per_100g" value="'
+                + (food.protein_per_100g || 0) + '" step="0.1"></label>'
+                + '<label>C/100g<input type="number" class="field" data-f="carbs_per_100g" value="'
+                + (food.carbs_per_100g || 0) + '" step="0.1"></label>'
+                + '<label>F/100g<input type="number" class="field" data-f="fat_per_100g" value="'
+                + (food.fat_per_100g || 0) + '" step="0.1"></label>'
+                + '</div>'
+                + '<label class="exclude-toggle" style="margin:0 0 0.55rem;">'
+                + '<input type="checkbox" data-recalc checked>'
+                + '<span class="ex-copy"><strong>Also recalc this log</strong>'
+                + '<span>Apply new per-100g macros to this meal’s weight.</span></span>'
+                + '</label>'
+                + '<div class="field-row" style="margin:0;">'
+                + '<button type="button" class="btn btn-primary" data-save="food">Save food</button>'
+                + '<button type="button" class="btn btn-ghost" data-cancel>Cancel</button>'
+                + '</div>';
+              panel.querySelector('[data-cancel]').onclick = () => { panel.hidden = true; panel.innerHTML = ''; };
+              panel.querySelector('[data-save="food"]').onclick = async () => {
+                const payload = {};
+                panel.querySelectorAll('[data-f]').forEach(inp => {
+                  payload[inp.dataset.f] = parseFloat(inp.value);
+                });
+                const fres = await fetch('/api/ingredients/' + encodeURIComponent(meal.ingredient_id), {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(payload)
+                });
+                const fdata = await fres.json();
+                if (!fres.ok) return showToast(fdata.message || 'Could not update food');
+                foodCatalogCache = [];
+                if (panel.querySelector('[data-recalc]').checked) {
+                  const g = Number(meal.weight_g) || 0;
+                  const factor = g / 100;
+                  await fetch('/api/meals/' + encodeURIComponent(mealId), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      calories: round1((payload.calories_per_100g || 0) * factor),
+                      protein: round1((payload.protein_per_100g || 0) * factor),
+                      carbs: round1((payload.carbs_per_100g || 0) * factor),
+                      fat: round1((payload.fat_per_100g || 0) * factor),
+                    })
+                  });
+                }
+                showToast('Food macros updated');
+                openDayDetail(dateStr, rowEl);
+                loadDailySummary();
+              };
             }
           });
         });
@@ -2703,10 +3396,19 @@
 
     async function loadFoodManager() {
       const list = document.getElementById('food-manage-list');
+      const countEl = document.getElementById('food-manage-count');
+      if (!list) return;
       list.innerHTML = '<div class="sheet-empty">Loading…</div>';
+      if (countEl) countEl.textContent = '';
       try {
-        const res = await fetch('/api/ingredients');
-        allManageFoods = await res.json();
+        // Always use on-device catalog — cloud IDs don't match local UUIDs.
+        const res = await fetch('/api/ingredients?source=local');
+        const data = await res.json();
+        if (!res.ok) {
+          list.innerHTML = '<div class="sheet-empty">' + escapeHtml(data.message || 'Could not load foods.') + '</div>';
+          return;
+        }
+        allManageFoods = Array.isArray(data) ? data : [];
         foodCatalogCache = allManageFoods;
         filterFoodManager(document.getElementById('food-manage-search').value || '');
       } catch (e) {
@@ -2716,22 +3418,37 @@
 
     function filterFoodManager(query) {
       const list = document.getElementById('food-manage-list');
-      const q = (query || '').trim().lower();
-      const items = !q ? allManageFoods.slice(0, 40) : allManageFoods.filter(f => (f.name || '').toLowerCase().includes(q)).slice(0, 40);
+      const countEl = document.getElementById('food-manage-count');
+      if (!list) return;
+      const q = (query || '').trim().toLowerCase();
+      const matched = !q
+        ? allManageFoods.slice()
+        : allManageFoods.filter(f => (f.name || '').toLowerCase().includes(q));
+      matched.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+      const items = matched.slice(0, 60);
       list.innerHTML = '';
+      if (countEl) {
+        countEl.textContent = matched.length
+          ? ('Showing ' + items.length + (matched.length > items.length ? ' of ' + matched.length : '') + ' food' + (matched.length === 1 ? '' : 's'))
+          : 'No foods match.';
+      }
       if (!items.length) {
         list.innerHTML = '<div class="sheet-empty">No foods found.</div>';
         return;
       }
       items.forEach(food => {
         const row = document.createElement('div');
-        row.className = 'result-btn';
-        row.style.cursor = 'default';
-        row.innerHTML = '<span><strong></strong><div class="hint" style="margin:0.2rem 0 0;"></div></span>';
-        row.querySelector('strong').textContent = food.name;
-        row.querySelector('.hint').textContent =
+        row.className = 'food-manage-row';
+        row.dataset.foodId = String(food.id);
+
+        const meta = document.createElement('div');
+        meta.className = 'food-meta';
+        meta.innerHTML = '<strong></strong><div class="hint"></div>';
+        meta.querySelector('strong').textContent = food.name || 'Unnamed';
+        meta.querySelector('.hint').textContent =
           (food.calories_per_100g || 0) + ' kcal/100g · P' + (food.protein_per_100g || 0)
           + ' C' + (food.carbs_per_100g || 0) + ' F' + (food.fat_per_100g || 0);
+
         const actions = document.createElement('div');
         actions.className = 'meal-actions';
         const editBtn = document.createElement('button');
@@ -2741,43 +3458,82 @@
         delBtn.type = 'button';
         delBtn.className = 'danger';
         delBtn.textContent = 'Delete';
-        editBtn.addEventListener('click', async () => {
-          const name = prompt('Name', food.name);
-          if (name == null) return;
-          const calories = prompt('Calories / 100g', food.calories_per_100g);
-          if (calories == null) return;
-          const protein = prompt('Protein / 100g', food.protein_per_100g);
-          if (protein == null) return;
-          const carbs = prompt('Carbs / 100g', food.carbs_per_100g);
-          if (carbs == null) return;
-          const fat = prompt('Fat / 100g', food.fat_per_100g);
-          if (fat == null) return;
-          await fetch('/api/ingredients/' + encodeURIComponent(food.id), {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name,
-              basis: 'per_100g',
-              calories: parseFloat(calories),
-              protein: parseFloat(protein),
-              carbs: parseFloat(carbs),
-              fat: parseFloat(fat),
-            })
-          });
-          showToast('Food updated');
-          foodCatalogCache = [];
-          loadFoodManager();
-        });
-        delBtn.addEventListener('click', async () => {
-          if (!confirm('Delete ' + food.name + '?')) return;
-          await fetch('/api/ingredients/' + encodeURIComponent(food.id), { method: 'DELETE' });
-          showToast('Food deleted');
-          foodCatalogCache = [];
-          loadFoodManager();
-        });
         actions.appendChild(editBtn);
         actions.appendChild(delBtn);
+
+        const panel = document.createElement('div');
+        panel.className = 'inline-edit';
+        panel.hidden = true;
+
+        editBtn.addEventListener('click', () => {
+          list.querySelectorAll('.inline-edit').forEach(p => {
+            p.hidden = true;
+            p.innerHTML = '';
+          });
+          panel.hidden = false;
+          panel.innerHTML =
+            '<p class="hint" style="margin:0 0 0.45rem;">Macros are per 100g.</p>'
+            + '<label class="field-stack" style="margin-bottom:0.45rem;">Name'
+            + '<input type="text" class="field" data-f="name" value=""></label>'
+            + '<div class="macro-grid">'
+            + '<label>kcal<input type="number" class="field" data-f="calories_per_100g" step="0.1" inputmode="decimal"></label>'
+            + '<label>Protein<input type="number" class="field" data-f="protein_per_100g" step="0.1" inputmode="decimal"></label>'
+            + '<label>Carbs<input type="number" class="field" data-f="carbs_per_100g" step="0.1" inputmode="decimal"></label>'
+            + '<label>Fat<input type="number" class="field" data-f="fat_per_100g" step="0.1" inputmode="decimal"></label>'
+            + '</div>'
+            + '<div class="field-row" style="margin:0;">'
+            + '<button type="button" class="btn btn-primary" data-save>Save</button>'
+            + '<button type="button" class="btn btn-ghost" data-cancel>Cancel</button>'
+            + '</div>';
+          panel.querySelector('[data-f="name"]').value = food.name || '';
+          panel.querySelector('[data-f="calories_per_100g"]').value = food.calories_per_100g ?? 0;
+          panel.querySelector('[data-f="protein_per_100g"]').value = food.protein_per_100g ?? 0;
+          panel.querySelector('[data-f="carbs_per_100g"]').value = food.carbs_per_100g ?? 0;
+          panel.querySelector('[data-f="fat_per_100g"]').value = food.fat_per_100g ?? 0;
+          panel.querySelector('[data-cancel]').onclick = () => { panel.hidden = true; panel.innerHTML = ''; };
+          panel.querySelector('[data-save]').onclick = async () => {
+            const payload = {
+              name: panel.querySelector('[data-f="name"]').value.trim(),
+              calories_per_100g: parseFloat(panel.querySelector('[data-f="calories_per_100g"]').value),
+              protein_per_100g: parseFloat(panel.querySelector('[data-f="protein_per_100g"]').value),
+              carbs_per_100g: parseFloat(panel.querySelector('[data-f="carbs_per_100g"]').value),
+              fat_per_100g: parseFloat(panel.querySelector('[data-f="fat_per_100g"]').value),
+            };
+            if (!payload.name) return showToast('Name required');
+            try {
+              const res = await fetch('/api/ingredients/' + encodeURIComponent(food.id), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+              });
+              const data = await res.json();
+              if (!res.ok) return showToast(data.message || 'Could not update food');
+              showToast('Food updated');
+              foodCatalogCache = [];
+              loadFoodManager();
+            } catch (e) {
+              showToast('Could not update food');
+            }
+          };
+        });
+
+        delBtn.addEventListener('click', async () => {
+          if (!confirm('Delete ' + (food.name || 'this food') + ' from the database?')) return;
+          try {
+            const res = await fetch('/api/ingredients/' + encodeURIComponent(food.id), { method: 'DELETE' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) return showToast(data.message || 'Could not delete');
+            showToast('Food deleted');
+            foodCatalogCache = [];
+            loadFoodManager();
+          } catch (e) {
+            showToast('Could not delete food');
+          }
+        });
+
+        row.appendChild(meta);
         row.appendChild(actions);
+        row.appendChild(panel);
         list.appendChild(row);
       });
     }
@@ -2792,6 +3548,12 @@
 
     function round(val) {
       return Math.round((val || 0) * 10) / 10;
+    }
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
     }
   </script>
 </body>
